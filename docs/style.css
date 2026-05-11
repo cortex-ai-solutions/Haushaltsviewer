@@ -231,6 +231,36 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   font-weight: 600;
 }
 
+/* ── Tab-Navigation ──────────────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: .4rem;
+  margin-bottom: 1.2rem;
+  border-bottom: 2px solid var(--gray-200);
+  padding-bottom: 0;
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: .6rem 1.2rem;
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--gray-600);
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: all .15s;
+}
+.tab:hover { background: var(--green-pale); color: var(--green); }
+.tab.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+  background: var(--green-pale);
+}
+.tab-panel { }
+.tab-panel.hidden { display: none; }
+
 /* ── Explorer ────────────────────────────────────────────────────────────────── */
 .explorer-section {
   max-width: 1200px;
@@ -272,7 +302,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   outline: none;
 }
 .filter-group select:focus, .filter-group input:focus { border-color: var(--green-light); }
-#explorer-result {
+#explorer-result, #stellen-result {
   background: var(--white);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -287,24 +317,129 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .kacheln-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
 }
 .kachel {
   background: var(--white);
   border-radius: var(--radius);
-  padding: 1.3rem 1.4rem;
+  padding: 1.2rem 1.4rem;
   box-shadow: var(--shadow-sm);
   border-top: 4px solid var(--green);
 }
-.kachel .k-label { font-size: .8rem; color: var(--gray-600); margin-bottom: .3rem; }
-.kachel .k-value { font-size: 1.6rem; font-weight: 700; color: var(--green); }
-.kachel .k-sub   { font-size: .78rem; color: var(--gray-400); margin-top: .2rem; }
-.skeleton { animation: pulse 1.5s ease-in-out infinite; min-height: 90px; }
+.kachel .k-icon  { font-size: 1.4rem; margin-bottom: .3rem; }
+.kachel .k-label { font-size: .78rem; color: var(--gray-600); margin-bottom: .25rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.kachel .k-value { font-size: 1.5rem; font-weight: 700; color: var(--green); }
+.kachel .k-sub   { font-size: .75rem; color: var(--gray-400); margin-top: .2rem; }
+.kachel-personal { border-top-color: #1b5e20; }
+.kachel-stellen  { border-top-color: #0d47a1; }
+.kachel-stellen .k-value { color: #0d47a1; }
+.kachel-invest   { border-top-color: #e65100; }
+.kachel-invest .k-value  { color: #e65100; }
+.skeleton { animation: pulse 1.5s ease-in-out infinite; min-height: 100px; }
 @keyframes pulse {
   0%, 100% { background: var(--gray-100); }
   50%       { background: var(--gray-200); }
 }
+
+/* ── Chart Subtitle ──────────────────────────────────────────────────────────── */
+.chart-subtitle {
+  font-size: .82rem;
+  color: var(--gray-400);
+  margin: -.5rem 0 .8rem;
+}
+
+/* ── Stellenplan Balkendiagramm ──────────────────────────────────────────────── */
+#stellen-bar-container {
+  background: var(--white);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow-sm);
+}
+.stellen-legend {
+  font-size: .8rem;
+  color: var(--gray-600);
+  margin-bottom: .8rem;
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+}
+.leg-dot {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.stellen-bars { display: flex; flex-direction: column; gap: .5rem; }
+.stellen-row {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: .3rem .5rem;
+  transition: background .12s;
+}
+.stellen-row:hover { background: var(--green-pale); }
+.stellen-label {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+}
+.kap-nr   { font-size: .75rem; font-weight: 700; color: var(--green); }
+.kap-name { font-size: .72rem; color: var(--gray-600); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stellen-bar-wrap { flex: 1; }
+.stellen-bar-bg   { background: transparent; }
+.stellen-bar {
+  height: 14px;
+  border-radius: 3px;
+  transition: width .4s;
+}
+.stellen-bar.beamte { background: #1b5e20; }
+.stellen-bar.tarif  { background: #4caf50; }
+.stellen-total {
+  width: 55px;
+  text-align: right;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--gray-800);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Stellenplan Tabelle ─────────────────────────────────────────────────────── */
+.stellen-table { font-size: .85rem; }
+.stellen-2026 { color: var(--green); font-weight: 700; }
+.kap-badge {
+  display: inline-block;
+  background: var(--green-pale);
+  color: var(--green);
+  border-radius: 4px;
+  padding: .1rem .45rem;
+  font-size: .75rem;
+  font-weight: 700;
+}
+.bes-badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: .1rem .45rem;
+  font-size: .75rem;
+  font-weight: 700;
+}
+.badge-beamter { background: #e8f5e9; color: #1b5e20; }
+.badge-tarif   { background: #e3f2fd; color: #1565c0; }
+.kw-badge {
+  display: inline-block;
+  background: #fff3e0;
+  color: #e65100;
+  border-radius: 3px;
+  padding: 0 .35rem;
+  font-size: .68rem;
+  font-weight: 600;
+  margin-left: .4rem;
+}
+.small-text { font-size: .75rem; color: var(--gray-400); }
 
 /* ── Treemap ─────────────────────────────────────────────────────────────────── */
 .chart-section {

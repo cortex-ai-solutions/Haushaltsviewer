@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Thüringer Haushaltsplan 2026/2027 – Interaktiv</title>
   <link rel="stylesheet" href="style.css">
-  <!-- DuckDB WASM -->
-  <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser-eh.js"></script>
-  <!-- Observable Plot (Charts) -->
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -16,7 +13,7 @@
 <header>
   <div class="header-inner">
     <div class="header-title">
-      <span class="flag">🇩🇪</span>
+      <span class="flag">🏛️</span>
       <div>
         <h1>Thüringer Haushaltsplan</h1>
         <p>Doppelhaushalt 2026 / 2027 · Freistaat Thüringen</p>
@@ -33,25 +30,25 @@
     <input
       type="text"
       id="nl-input"
-      placeholder="Stellen Sie Ihre Frage auf Deutsch … z.B. »Wieviel kostet das Personal im Finanzministerium?«"
+      placeholder="Frage auf Deutsch … z.B. »Wie viele Beamte gibt es im Finanzministerium?«"
       autocomplete="off"
       spellcheck="false"
     >
     <button id="nl-btn" class="btn-primary" title="Frage stellen (Enter)">Fragen →</button>
   </div>
   <div class="quick-links">
-    <button class="quick-btn" data-q="Zeige die Personalkosten aller Ministerien 2026 als Übersicht">👥 Personalkosten gesamt</button>
+    <button class="quick-btn" data-q="Zeige die Personalkosten aller Ministerien 2026 als Übersicht">👥 Personalkosten</button>
+    <button class="quick-btn" data-q="Wie viele Beamte und Tarifbeschäftigte gibt es insgesamt 2026? Zeige die Summe aus der Stellenübersicht nach Typ.">🏢 Planstellen gesamt</button>
     <button class="quick-btn" data-q="Welche 10 Kapitel haben die höchsten Ausgaben 2026?">📊 Top-10 Ausgaben</button>
-    <button class="quick-btn" data-q="Vergleiche Ansatz 2026 und 2027 für alle Ministerien">📅 Vergleich 2026 vs 2027</button>
-    <button class="quick-btn" data-q="Zeige alle Investitionsausgaben (Hauptgruppe 8) 2026">🏗️ Investitionen</button>
-    <button class="quick-btn" data-q="Was sind die Ausgaben für Bildung und Kultur 2026?">🎓 Bildung & Kultur</button>
+    <button class="quick-btn" data-q="Vergleiche Ansatz 2026 und 2027 für alle Ministerien">📅 2026 vs 2027</button>
+    <button class="quick-btn" data-q="Zeige alle Besoldungsgruppen A12 mit Anzahl Planstellen 2026">🔎 Besoldungsgruppe A12</button>
   </div>
 </section>
 
 <!-- ── Status / Fehler ──────────────────────────────────────────────────────── -->
 <div id="status-bar" class="status-bar hidden"></div>
 
-<!-- ── Antwort-Bereich ──────────────────────────────────────────────────────── -->
+<!-- ── Antwort-Bereich (NL-Query) ────────────────────────────────────────────── -->
 <section id="answer-section" class="hidden">
   <div class="answer-header">
     <div>
@@ -64,43 +61,7 @@
   <div id="table-container"></div>
 </section>
 
-<!-- ── Explorer (Filter-Kacheln) ─────────────────────────────────────────────── -->
-<section class="explorer-section">
-  <h2>Haushalt erkunden</h2>
-  <div class="filter-row">
-    <div class="filter-group">
-      <label for="f-ep">Ministerium</label>
-      <select id="f-ep"><option value="">Alle</option></select>
-    </div>
-    <div class="filter-group">
-      <label for="f-hgr">Ausgabenart</label>
-      <select id="f-hgr">
-        <option value="">Alle</option>
-        <option value="4">👥 Personal</option>
-        <option value="5">📦 Sachmittel</option>
-        <option value="6">🤝 Zuweisungen</option>
-        <option value="7">🏗️ Baumaßnahmen</option>
-        <option value="8">📈 Investitionen</option>
-      </select>
-    </div>
-    <div class="filter-group">
-      <label for="f-jahr">Jahr</label>
-      <select id="f-jahr">
-        <option value="ansatz_2026">2026</option>
-        <option value="ansatz_2027">2027</option>
-        <option value="ist_2024">Ist 2024</option>
-      </select>
-    </div>
-    <div class="filter-group">
-      <label for="f-search">Suche in Bezeichnung</label>
-      <input type="text" id="f-search" placeholder="z.B. Beamte, Miete …">
-    </div>
-    <button id="filter-btn" class="btn-secondary">Anzeigen</button>
-  </div>
-  <div id="explorer-result"></div>
-</section>
-
-<!-- ── Übersichtskacheln ─────────────────────────────────────────────────────── -->
+<!-- ── Kacheln ────────────────────────────────────────────────────────────────── -->
 <section class="kacheln-section">
   <h2>Gesamtübersicht 2026</h2>
   <div id="kacheln-grid" class="kacheln-grid">
@@ -108,12 +69,92 @@
     <div class="kachel skeleton"></div>
     <div class="kachel skeleton"></div>
     <div class="kachel skeleton"></div>
+    <div class="kachel skeleton"></div>
   </div>
+</section>
+
+<!-- ── Explorer (Tabs: Haushalt | Stellen) ──────────────────────────────────── -->
+<section class="explorer-section">
+  <div class="tab-bar">
+    <button class="tab active" data-tab="haushalt">💰 Haushaltsstellen</button>
+    <button class="tab"        data-tab="stellen" >👥 Planstellen</button>
+  </div>
+
+  <!-- Tab: Haushaltsstellen -->
+  <div id="tab-haushalt" class="tab-panel">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label for="f-ep">Ministerium</label>
+        <select id="f-ep"><option value="">Alle</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="f-hgr">Ausgabenart</label>
+        <select id="f-hgr">
+          <option value="">Alle</option>
+          <option value="4">👥 Personal</option>
+          <option value="5">📦 Sachmittel</option>
+          <option value="6">🤝 Zuweisungen</option>
+          <option value="7">🏗️ Baumaßnahmen</option>
+          <option value="8">📈 Investitionen</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="f-jahr">Jahr</label>
+        <select id="f-jahr">
+          <option value="ansatz_2026">2026</option>
+          <option value="ansatz_2027">2027</option>
+          <option value="ist_2024">Ist 2024</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="f-search">Suche in Bezeichnung</label>
+        <input type="text" id="f-search" placeholder="z.B. Beamte, Miete …">
+      </div>
+      <button id="filter-btn" class="btn-secondary">Anzeigen</button>
+    </div>
+    <div id="explorer-result"></div>
+  </div>
+
+  <!-- Tab: Planstellen -->
+  <div id="tab-stellen" class="tab-panel hidden">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label for="s-kapitel">Kapitel</label>
+        <select id="s-kapitel"><option value="">Alle</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="s-typ">Beschäftigungsart</label>
+        <select id="s-typ">
+          <option value="">Alle</option>
+          <option value="Beamter">🏅 Beamte</option>
+          <option value="Tarifbeschäftigter">📋 Tarifbeschäftigte</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="s-besoldung">Besoldungs-/Entgeltgruppe</label>
+        <input type="text" id="s-besoldung" placeholder="z.B. A12, E9a, B3 …">
+      </div>
+      <div class="filter-group">
+        <label for="s-bezeichnung">Suche Bezeichnung</label>
+        <input type="text" id="s-bezeichnung" placeholder="z.B. Amtsrat, Steuer …">
+      </div>
+      <button id="stellen-btn" class="btn-secondary">Anzeigen</button>
+    </div>
+    <div id="stellen-result"></div>
+  </div>
+</section>
+
+<!-- ── Stellenplan-Übersicht (Diagramm) ─────────────────────────────────────── -->
+<section class="chart-section" id="stellen-chart-section">
+  <h2>Planstellen 2026 – Beamte vs. Tarifbeschäftigte</h2>
+  <p class="chart-subtitle">nach Kapitel · Klick auf Balken = Detailansicht</p>
+  <div id="stellen-bar-container"></div>
 </section>
 
 <!-- ── Treemap ───────────────────────────────────────────────────────────────── -->
 <section class="chart-section">
   <h2>Haushaltsstruktur – Ministerien 2026</h2>
+  <p class="chart-subtitle">nach Gesamtausgaben · Klick für Detailansicht</p>
   <div id="treemap-container"></div>
 </section>
 
@@ -123,7 +164,7 @@
     <p>
       Datenquelle: <a href="https://finanzen.thueringen.de/themen/haushalt/haushaltsplaene/haushalt-2026/2027" target="_blank">Thüringer Finanzministerium</a> ·
       Keine offizielle Seite des Freistaats Thüringen ·
-      <a href="https://github.com" target="_blank">Quellcode auf GitHub</a>
+      <a href="https://github.com/cortex-ai-solutions/Haushaltsviewer" target="_blank">Quellcode auf GitHub</a>
     </p>
     <p id="footer-stand">Stand: –</p>
   </div>
@@ -132,9 +173,9 @@
 <!-- ── API-Key Modal ─────────────────────────────────────────────────────────── -->
 <div id="key-modal" class="modal hidden">
   <div class="modal-box">
-    <h3>NL-Query benötigt API-Verbindung</h3>
-    <p>Die KI-Suche läuft über einen sicheren Proxy. Bitte geben Sie die Worker-URL ein
-       (wird einmalig im Browser gespeichert).</p>
+    <h3>KI-Suche: Worker-URL eingeben</h3>
+    <p>Die KI-gestützte Suche läuft über einen sicheren Cloudflare-Proxy.
+       Gib die Worker-URL ein (wird einmalig im Browser gespeichert).</p>
     <input type="url" id="worker-url-input" placeholder="https://haushalt.DEIN-NAME.workers.dev/query">
     <div class="modal-actions">
       <button id="key-save" class="btn-primary">Speichern</button>
