@@ -22,18 +22,54 @@ async function initDuckDB() {
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
   conn = await db.connect();
 
-  // SQLite-Extension laden (in EH-Bundle vorinstalliert – kein INSTALL nötig)
+  // SQLite-Extension laden
   try {
     await conn.query(`LOAD sqlite;`);
   } catch (_) {
-    await conn.query(`INSTALL sqlite;`);
+    try { await conn.query(`INSTALL sqlite;`); } catch (_2) {}
     await conn.query(`LOAD sqlite;`);
   }
+
+  // DB laden und als Datei registrieren
   const resp = await fetch(DB_URL);
   if (!resp.ok) throw new Error(`haushalt.db nicht gefunden (${resp.status})`);
   const buf = await resp.arrayBuffer();
   await db.registerFileBuffer("haushalt.db", new Uint8Array(buf));
-  await conn.query(`ATTACH 'haushalt.db' AS haus (TYPE SQLITE);`);
+
+  // Schema "haus" anlegen und Tabellen via sqlite_scan laden
+  // (zuverlässiger als ATTACH TYPE SQLITE in WASM-Umgebung)
+  await conn.query(`CREATE SCHEMA IF NOT EXISTS haus;`);
+
+  const TABLES = [
+    "haushaltsstellen", "kapitel", "einzelplaene",
+    "stellenplan", "stellenuebersicht",
+  ];
+  for (const t of TABLES) {
+    try {
+      await conn.query(
+        `CREATE TABLE IF NOT EXISTS haus.${t} AS
+         SELECT * FROM sqlite_scan('haushalt.db', '${t}')`
+      );
+    } catch (_) { /* Tabelle existiert nicht in dieser DB-Version */ }
+  }
+
+  // Views nachbauen
+  await conn.query(`
+    CREATE VIEW IF NOT EXISTS haus.v_personal AS
+    SELECT * FROM haus.haushaltsstellen WHERE hauptgruppe = '4';
+  `);
+  await conn.query(`
+    CREATE VIEW IF NOT EXISTS haus.v_ministerium_summen AS
+    SELECT ministerium, einzelplan,
+      SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2026 ELSE 0 END) AS personal_2026,
+      SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2027 ELSE 0 END) AS personal_2027,
+      SUM(CASE WHEN hauptgruppe IN ('4','5','6','7','8','9') THEN ansatz_2026 ELSE 0 END) AS ausgaben_2026,
+      SUM(CASE WHEN hauptgruppe IN ('4','5','6','7','8','9') THEN ansatz_2027 ELSE 0 END) AS ausgaben_2027,
+      SUM(ansatz_2026) AS gesamt_2026,
+      SUM(ansatz_2027) AS gesamt_2027
+    FROM haus.haushaltsstellen
+    GROUP BY ministerium, einzelplan;
+  `);
 }
 
 // ── Abfrage-Wrapper ───────────────────────────────────────────────────────────
