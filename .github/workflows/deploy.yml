@@ -1,0 +1,57 @@
+name: Haushaltsplan Pipeline & Deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Jeden 1. Januar neu bauen (neuer Haushalt)
+    - cron: "0 6 1 1 *"
+  workflow_dispatch:    # Manuell auslösbar (GitHub → Actions → Run workflow)
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r pipeline/requirements.txt
+
+      - name: PDFs herunterladen
+        run: python pipeline/01_download.py
+
+      - name: PDFs parsen
+        run: python pipeline/02_parse.py
+
+      - name: Datenbank bauen
+        run: python pipeline/03_build_db.py
+
+      - name: Daten validieren
+        run: python pipeline/04_validate.py
+
+      - name: Datenbank nach docs/ kopieren
+        run: |
+          mkdir -p docs/data
+          cp data/haushalt.db        docs/data/haushalt.db
+          cp data/haushaltsstellen.csv docs/data/haushaltsstellen.csv
+          cp data/meta.json          docs/data/meta.json
+
+      - name: GitHub Pages deployen
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          commit_message: "auto: Haushaltsplan ${{ github.run_number }} aktualisiert"

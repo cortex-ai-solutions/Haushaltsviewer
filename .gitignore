@@ -1,0 +1,10 @@
+data/pdfs/
+data/haushaltsstellen_raw.csv
+data/haushalt.db
+data/haushaltsstellen.csv
+data/meta.json
+__pycache__/
+.venv/
+*.pyc
+node_modules/
+.wrangler/

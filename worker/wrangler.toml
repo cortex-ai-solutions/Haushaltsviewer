@@ -1,0 +1,6 @@
+name = "haushalt"
+main = "haushalt-worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+# Secrets werden separat gesetzt: wrangler secret put ANTHROPIC_API_KEY
