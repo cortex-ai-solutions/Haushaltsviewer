@@ -261,6 +261,52 @@ def build_db(df: pd.DataFrame):
     con.close()
 
 
+def export_json_files(df_haus: pd.DataFrame):
+    """Exportiert alle Tabellen als JSON → docs/data/ (für DuckDB WASM im Browser)."""
+    docs_data = DATA_DIR.parent / "docs" / "data"
+    docs_data.mkdir(parents=True, exist_ok=True)
+
+    # haushaltsstellen
+    df_haus.to_json(docs_data / "haushaltsstellen.json", orient="records",
+                    force_ascii=False, indent=None)
+    print(f"  JSON: haushaltsstellen.json ({len(df_haus)} Zeilen)")
+
+    # kapitel
+    kap = df_haus[["kapitel", "einzelplan", "kapitel_name"]].drop_duplicates(subset=["kapitel"])
+    kap.to_json(docs_data / "kapitel.json", orient="records", force_ascii=False)
+    print(f"  JSON: kapitel.json ({len(kap)} Zeilen)")
+
+    # einzelplaene
+    eps = df_haus[["einzelplan", "ministerium"]].drop_duplicates()
+    eps = eps.rename(columns={"einzelplan": "nr", "ministerium": "name"})
+    eps["pdf_url"] = eps["nr"].map(PDF_URLS).fillna("")
+    eps.to_json(docs_data / "einzelplaene.json", orient="records", force_ascii=False)
+    print(f"  JSON: einzelplaene.json ({len(eps)} Zeilen)")
+
+    # stellenplan
+    if STELLEN_CSV.exists():
+        df_s = pd.read_csv(STELLEN_CSV, dtype=str).rename(columns={
+            "besgruppe": "besoldung", "kw_anzahl": "kw_stellen", "kw_jahr": "kw_ab_jahr"
+        })
+        for col in ["stellen_2025", "stellen_2026", "stellen_2027", "kw_stellen", "kw_ab_jahr"]:
+            if col in df_s.columns:
+                df_s[col] = pd.to_numeric(df_s[col], errors="coerce")
+        df_s["kapitel"] = df_s["kapitel"].astype(str).str.zfill(4)
+        df_s.to_json(docs_data / "stellenplan.json", orient="records", force_ascii=False)
+        print(f"  JSON: stellenplan.json ({len(df_s)} Zeilen)")
+
+    # stellenuebersicht
+    if UEBERSICHT_CSV.exists():
+        df_u = pd.read_csv(UEBERSICHT_CSV, dtype=str)
+        df_u["stellen"] = pd.to_numeric(df_u["stellen"], errors="coerce")
+        df_u["jahr"]    = pd.to_numeric(df_u["jahr"],    errors="coerce")
+        df_u["kapitel"] = df_u["kapitel"].apply(
+            lambda x: str(x).zfill(4) if str(x).isdigit() else x
+        )
+        df_u.to_json(docs_data / "stellenuebersicht.json", orient="records", force_ascii=False)
+        print(f"  JSON: stellenuebersicht.json ({len(df_u)} Zeilen)")
+
+
 def main():
     if not RAW_CSV.exists():
         print(f"Rohdaten nicht gefunden: {RAW_CSV}")
@@ -284,6 +330,9 @@ def main():
     # Bereinigte CSV exportieren
     df.to_csv(CLEAN_CSV, index=False, encoding="utf-8-sig")
     print(f"Bereinigte CSV: {CLEAN_CSV}")
+
+    # JSON-Export für DuckDB WASM (kein SQLite-Extension nötig im Browser)
+    export_json_files(df)
 
     # Metadaten
     meta = {

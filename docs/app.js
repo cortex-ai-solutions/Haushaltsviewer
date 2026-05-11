@@ -12,8 +12,8 @@ let conn = null;
 
 // ── DuckDB initialisieren ─────────────────────────────────────────────────────
 async function initDuckDB() {
-  const bundles = duckdb.getJsDelivrBundles();
-  const bundle  = await duckdb.selectBundle(bundles);
+  const bundles   = duckdb.getJsDelivrBundles();
+  const bundle    = await duckdb.selectBundle(bundles);
   const workerUrl = URL.createObjectURL(
     new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" })
   );
@@ -22,38 +22,33 @@ async function initDuckDB() {
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
   conn = await db.connect();
 
-  // SQLite-Extension laden
-  try {
-    await conn.query(`LOAD sqlite;`);
-  } catch (_) {
-    try { await conn.query(`INSTALL sqlite;`); } catch (_2) {}
-    await conn.query(`LOAD sqlite;`);
-  }
-
-  // DB laden und als Datei registrieren
-  const resp = await fetch(DB_URL);
-  if (!resp.ok) throw new Error(`haushalt.db nicht gefunden (${resp.status})`);
-  const buf = await resp.arrayBuffer();
-  await db.registerFileBuffer("haushalt.db", new Uint8Array(buf));
-
-  // Schema "haus" anlegen und Tabellen via sqlite_scan laden
-  // (zuverlässiger als ATTACH TYPE SQLITE in WASM-Umgebung)
+  // Schema anlegen
   await conn.query(`CREATE SCHEMA IF NOT EXISTS haus;`);
 
+  // Tabellen aus JSON laden (kein SQLite-Extension nötig – DuckDB WASM native)
   const TABLES = [
     "haushaltsstellen", "kapitel", "einzelplaene",
     "stellenplan", "stellenuebersicht",
   ];
+
+  let geladen = 0;
   for (const t of TABLES) {
     try {
+      const resp = await fetch(`./data/${t}.json`);
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      await db.registerFileText(`${t}.json`, text);
       await conn.query(
         `CREATE TABLE IF NOT EXISTS haus.${t} AS
-         SELECT * FROM sqlite_scan('haushalt.db', '${t}')`
+         SELECT * FROM read_json_auto('${t}.json')`
       );
-    } catch (_) { /* Tabelle existiert nicht in dieser DB-Version */ }
+      geladen++;
+    } catch (_) { /* optionale Tabelle fehlt */ }
   }
 
-  // Views nachbauen
+  if (geladen === 0) throw new Error("Keine Datentabellen gefunden – JSON-Dateien fehlen.");
+
+  // Views
   await conn.query(`
     CREATE VIEW IF NOT EXISTS haus.v_personal AS
     SELECT * FROM haus.haushaltsstellen WHERE hauptgruppe = '4';
@@ -614,7 +609,7 @@ async function boot() {
     clearStatus();
   } catch (e) {
     setStatus(
-      `⚠️ haushalt.db nicht gefunden. Bitte zuerst ausführen: python pipeline/02_parse.py --pilot && python pipeline/02b_parse_stellenplan.py --pilot && python pipeline/03_build_db.py`,
+      `⚠️ Daten nicht gefunden. Bitte zuerst ausführen: python pipeline/02_parse.py --pilot && python pipeline/02b_parse_stellenplan.py --pilot && python pipeline/03_build_db.py`,
       "error"
     );
     document.getElementById("kacheln-grid").innerHTML =
