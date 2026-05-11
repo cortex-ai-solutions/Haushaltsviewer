@@ -7,8 +7,13 @@ Ausführen:  python pipeline/01_download.py
 
 import argparse
 import sys
+import io
 from pathlib import Path
 import requests
+
+# Windows-Terminal: UTF-8 erzwingen
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 BASE_URL = "https://finanzen.thueringen.de/fileadmin/medien_tfm/Haushalt/2026_2027"
 

@@ -9,10 +9,15 @@ Ergebnis:
   data/meta.json             – Metadaten
 """
 
+import io
 import json
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import pandas as pd
 

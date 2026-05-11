@@ -1,22 +1,28 @@
 """
-02_parse.py – Tabellenextraktion aus Thüringer Haushaltsplan-PDFs (pdfplumber).
+02_parse.py – Tabellenextraktion aus Thüringer Haushaltsplan-PDFs.
+
+Strategie: extract_text() pro Seite + Zeile-für-Zeile-Regex
+(extract_table() greift nicht, da Haushaltsstellen im Fließtext liegen)
 
 Ausführen:
   python pipeline/02_parse.py --pilot          # nur EP 06
   python pipeline/02_parse.py --debug ep_06    # Rohzeilen einer PDF anzeigen
   python pipeline/02_parse.py                  # alle heruntergeladenen PDFs
 
-Ergebnis: data/haushaltsstellen_raw.csv (eine Zeile pro Haushaltsstelle)
+Ergebnis: data/haushaltsstellen_raw.csv
 """
 
 import argparse
-import json
+import io
 import re
 import sys
 from pathlib import Path
 
 import pandas as pd
 import pdfplumber
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 DATA_DIR   = Path(__file__).parent.parent / "data"
 PDF_DIR    = DATA_DIR / "pdfs"
@@ -54,19 +60,46 @@ MINISTERIEN = {
     "18": "Staatliche Hochbaumaßnahmen",
 }
 
-# Regex-Muster ─────────────────────────────────────────────────────────────────
-RE_KAPITEL     = re.compile(r"Kapitel\s+(\d{4})", re.IGNORECASE)
-RE_TITEL_NR    = re.compile(r"^\s*(\d{3}\s*\d{2})\s")   # z.B. "422 01"
-RE_ZAHL        = re.compile(r"^-?[\d\.]+$")
-RE_SUMME       = re.compile(r"(Summe|Gesamtsumme|Einnahmen|Ausgaben)\s+Kapitel", re.IGNORECASE)
-RE_EP_HEADER   = re.compile(r"Einzelplan\s+(\d{2})", re.IGNORECASE)
+# ── Regex-Muster ───────────────────────────────────────────────────────────────
+
+# Kapitel-Header im Seiten-Kopf: "06 01 Ministerium" oder "06 03 Thüringer Landesamt..."
+# Format in extract_text(): "[EP] [Ministerium] | [EP] [KapNr] [KapName] | Titel..."
+RE_KAPITEL_HEADER = re.compile(
+    r'(?:^|\|)\s*\d{2}\s+(\d{2})\s+([A-ZÄÖÜ][^\|]{3,60}?)(?:\s*\||$)',
+    re.MULTILINE
+)
+
+# Zeile mit Ist-2024-Wert (folgt auf Titelzeile): ". 11.581" oder "11.581"
+RE_IST_ZEILE = re.compile(
+    r'^[\s\.]*(\d{1,3}(?:\.\d{3})*)\s*[\.\s]*$'
+)
+
+# Seiten überspringen die nur Erläuterungen/Stellenplan enthalten
+SKIP_PATTERNS = [
+    re.compile(r'Erläuterungen zu den Änderungen im Stellenplan'),
+    re.compile(r'Erläuterungen zu den Änderungen in der Stellenübersicht'),
+    re.compile(r'Haushaltsbelastungen nach Jahren'),
+    re.compile(r'Verpflichtungsermächtigung.*fällig', re.DOTALL),
+]
+
+# Zeilenmuster die keine Haushaltsstellen sind
+SKIP_LINE_PATTERNS = [
+    re.compile(r'^(Summe|Abschluss|Einnahmen|Ausgaben|HGr\.|TGr\.|Titelgruppen|Angaben|Einzelplan)', re.IGNORECASE),
+    re.compile(r'^-\s+\d+\s+-'),        # Seitennummern "- 15 -"
+    re.compile(r'^noch zu \d'),         # Fortsetzungsseiten
+    re.compile(r'^Belast\.'),           # VE-Tabellen
+    re.compile(r'^[A-Z]\d+\s+[a-z]'),  # Besoldungsgruppen "A13 hD"
+    re.compile(r'^E\s+\d+\s+Tarif'),   # Entgeltgruppen
+    re.compile(r'^Summen?\s'),
+    re.compile(r'^kw:'),
+]
 
 
 def clean_zahl(s: str | None) -> float | None:
-    """'1.234.567' → 1234567.0, '-' oder None → None"""
+    """'1.234.567' → 1234567.0  |  '-' oder '' → None"""
     if not s:
         return None
-    s = s.strip().replace(".", "").replace(",", ".").replace(" ", "")
+    s = str(s).strip().replace(".", "").replace(",", ".").replace("\xa0", "")
     if s in ("-", "–", "—", ""):
         return None
     try:
@@ -75,79 +108,120 @@ def clean_zahl(s: str | None) -> float | None:
         return None
 
 
-def detect_orientation(page) -> str:
-    """'landscape' wenn Breite > Höhe, sonst 'portrait'"""
-    return "landscape" if page.width > page.height else "portrait"
+def is_betrag_token(token: str) -> bool:
+    """Prüft ob ein Token ein Geldbetrag sein könnte (z.B. '64.800', '0', '-')."""
+    return bool(re.match(r'^\d{1,3}(?:\.\d{3})*$|^0$|^-$', token))
 
 
-def extract_kapitel_name(page_text: str, kapitel_nr: str) -> str:
-    """Versucht, den Kapitelnamen aus dem Seitentext zu extrahieren."""
-    lines = page_text.splitlines()
-    for i, line in enumerate(lines):
-        if kapitel_nr in line and "Kapitel" in line:
-            # Nächste nicht-leere Zeile als Name
-            for j in range(i + 1, min(i + 4, len(lines))):
-                candidate = lines[j].strip()
-                if candidate and not RE_KAPITEL.match(candidate):
-                    return candidate
-    return ""
-
-
-def parse_row(row: list) -> dict | None:
+def parse_titel_line(line: str) -> dict | None:
     """
-    Versucht, eine Tabellenzeile als Haushaltsstelle zu interpretieren.
-    Erwartet Spaltenreihenfolge: [Tit., (FKZ), Zweckbestimmung, Ansatz2026, Ansatz2027, Ist2024]
-    Flexibel gegenüber leeren Zellen und unterschiedlichen Spaltenzahlen.
+    Versucht, eine Textzeile als Haushaltsstelle zu interpretieren.
+
+    Erwartetes Format:
+      NNN NN [NNN] Bezeichnung ... Ansatz2025 Ansatz2026 Ansatz2027
+
+    Rückgabe: dict mit Feldern oder None wenn keine Haushaltsstelle.
     """
-    if not row:
+    tokens = line.strip().split()
+
+    # Mindestanforderung: Titelkennzahl (3+2 Stellen) + mind. 2 Beträge
+    if len(tokens) < 5:
         return None
 
-    # Alle Zellen als String, leer → ""
-    cells = [str(c).strip() if c is not None else "" for c in row]
-
-    # Ersten nicht-leeren Wert als Titelkennzahl versuchen
-    titel_raw = cells[0] if cells else ""
-    titel_match = RE_TITEL_NR.match(titel_raw + " ")
-    if not titel_match:
+    # Token 0: exakt 3 Ziffern (Titelgruppe + lfd.Nr.)
+    if not re.match(r'^\d{3}$', tokens[0]):
+        return None
+    # Token 1: exakt 2 Ziffern (Titeluntergliederung)
+    if not re.match(r'^\d{2}$', tokens[1]):
         return None
 
-    titel = titel_match.group(1).replace(" ", "")  # "42201"
-    hauptgruppe = titel[0]  # erste Stelle = Hauptgruppe
+    titel_nr = tokens[0] + tokens[1]   # z.B. "51801"
+    hauptgruppe = tokens[0][0]          # erste Stelle: 4=Personal, 5=Sachmittel ...
 
-    # Bezeichnung ist die nächste nicht-numerische Zelle
-    bezeichnung = ""
-    zahl_cells = []
-    for cell in cells[1:]:
-        if not bezeichnung and not RE_ZAHL.match(cell.replace(".", "").replace(",", "").replace("-", "").replace("–", "").strip()):
-            bezeichnung = cell
-        elif cell:
-            zahl_cells.append(cell)
+    # Token 2: optionale FKZ (3 Ziffern)
+    fkz = None
+    body_start = 2
+    if len(tokens) > 4 and re.match(r'^\d{3}$', tokens[2]):
+        fkz = tokens[2]
+        body_start = 3
 
-    # Beträge: Ansatz 2026, Ansatz 2027, Ist 2024 (in dieser Reihenfolge)
-    ansatz_2026 = clean_zahl(zahl_cells[0]) if len(zahl_cells) > 0 else None
-    ansatz_2027 = clean_zahl(zahl_cells[1]) if len(zahl_cells) > 1 else None
-    ist_2024    = clean_zahl(zahl_cells[2]) if len(zahl_cells) > 2 else None
+    # Body: Bezeichnung + Beträge
+    body_tokens = [t for t in tokens[body_start:] if t != "."]
+
+    # Beträge von rechts aufsammeln (max. 3: Ansatz2025, Ansatz2026, Ansatz2027)
+    amounts = []
+    name_end = len(body_tokens)
+    for i in range(len(body_tokens) - 1, -1, -1):
+        if len(amounts) >= 3:
+            break
+        if is_betrag_token(body_tokens[i]):
+            amounts.insert(0, body_tokens[i])
+            name_end = i
+        else:
+            # Nicht-Betrag → Name-Bereich endet hier
+            break
+
+    if len(amounts) < 2:
+        # Zu wenige Beträge → keine Haushaltsstelle
+        return None
+
+    # Bezeichnung aus den verbleibenden Tokens
+    bezeichnung = " ".join(body_tokens[:name_end]).strip().rstrip(".,").strip()
+
+    # Beträge zuordnen
+    if len(amounts) == 3:
+        ansatz_2025 = clean_zahl(amounts[0])
+        ansatz_2026 = clean_zahl(amounts[1])
+        ansatz_2027 = clean_zahl(amounts[2])
+    else:
+        # Nur 2 Beträge → Ansatz 2026 + 2027
+        ansatz_2025 = None
+        ansatz_2026 = clean_zahl(amounts[0])
+        ansatz_2027 = clean_zahl(amounts[1])
 
     return {
-        "titel":       titel,
-        "titel_name":  bezeichnung,
-        "hauptgruppe": hauptgruppe,
+        "titel":            titel_nr,
+        "fkz":              fkz or "",
+        "titel_name":       bezeichnung,
+        "hauptgruppe":      hauptgruppe,
         "hauptgruppe_name": HAUPTGRUPPEN.get(hauptgruppe, ""),
-        "ansatz_2026": ansatz_2026,
-        "ansatz_2027": ansatz_2027,
-        "ist_2024":    ist_2024,
+        "ansatz_2025":      ansatz_2025,
+        "ansatz_2026":      ansatz_2026,
+        "ansatz_2027":      ansatz_2027,
+        "ist_2024":         None,   # wird ggf. von nächster Zeile ergänzt
     }
 
 
+def extract_kapitel(page_text: str, ep: str) -> tuple[str, str]:
+    """Extrahiert Kapitelnummer und -name aus dem Seitentext."""
+    for m in RE_KAPITEL_HEADER.finditer(page_text):
+        kap_nr = m.group(1)
+        kap_name = m.group(2).strip()
+        # Kapitel muss zum aktuellen EP passen: EP06 → 06xx
+        kapitel = ep + kap_nr
+        if kap_name and len(kap_name) > 2:
+            return kapitel, kap_name
+    return "", ""
+
+
+def should_skip_page(text: str) -> bool:
+    """Seiten mit reinen Erläuterungen überspringen."""
+    return any(p.search(text) for p in SKIP_PATTERNS)
+
+
+def should_skip_line(line: str) -> bool:
+    """Zeilen überspringen die keine Haushaltsstellen sind."""
+    return any(p.match(line.strip()) for p in SKIP_LINE_PATTERNS)
+
+
 def parse_pdf(pdf_path: Path, einzelplan_nr: str, debug: bool = False) -> list[dict]:
-    """
-    Verarbeitet eine Haushaltsplan-PDF und gibt eine Liste von Haushaltsstellen zurück.
-    """
+    """Verarbeitet eine Haushaltsplan-PDF und gibt Haushaltsstellen zurück."""
     ministerium = MINISTERIEN.get(einzelplan_nr, f"EP {einzelplan_nr}")
     records = []
-    current_kapitel = None
+    current_kapitel = ""
     current_kapitel_name = ""
-    seiten_ohne_tabelle = 0
+    prev_record = None
+    seiten_geskippt = 0
 
     print(f"\n  Verarbeite {pdf_path.name} ({ministerium}) ...")
 
@@ -155,106 +229,112 @@ def parse_pdf(pdf_path: Path, einzelplan_nr: str, debug: bool = False) -> list[d
         print(f"  Seiten: {len(pdf.pages)}")
 
         for page_num, page in enumerate(pdf.pages, start=1):
-            orientation = detect_orientation(page)
             text = page.extract_text() or ""
 
-            # Kapitel-Header erkennen (auch auf Portrait-Seiten)
-            kapitel_match = RE_KAPITEL.search(text)
-            if kapitel_match:
-                current_kapitel = kapitel_match.group(1)
-                current_kapitel_name = extract_kapitel_name(text, current_kapitel)
-                if debug:
-                    print(f"    Seite {page_num} [{orientation}]: Kapitel {current_kapitel} – {current_kapitel_name}")
-
-            # Nur Querformat-Seiten (oder explizite Tabellen) für Betragszeilen nutzen
-            table_settings = {
-                "vertical_strategy":   "text",
-                "horizontal_strategy": "text",
-                "snap_tolerance":      5,
-                "join_tolerance":      3,
-                "min_words_vertical":  2,
-            }
-
-            table = page.extract_table(table_settings)
-
-            if not table:
-                seiten_ohne_tabelle += 1
-                if debug and orientation == "landscape":
-                    print(f"    Seite {page_num} [{orientation}]: KEINE Tabelle erkannt")
+            # Seite überspringen?
+            if should_skip_page(text):
+                seiten_geskippt += 1
+                prev_record = None  # Ist-Wert-Tracking zurücksetzen
                 continue
 
-            if debug:
-                print(f"\n    === Seite {page_num} [{orientation}] – {len(table)} Zeilen ===")
-                for i, row in enumerate(table[:8]):
-                    print(f"    [{i}] {row}")
-                if len(table) > 8:
-                    print(f"    ... (+{len(table)-8} weitere Zeilen)")
+            # Kapitel aus Seitenkopf
+            kap, kap_name = extract_kapitel(text, einzelplan_nr)
+            if kap:
+                current_kapitel = kap
+                current_kapitel_name = kap_name
 
-            for row in table:
-                # Summierzeilen überspringen
-                row_text = " ".join(str(c) for c in row if c)
-                if RE_SUMME.search(row_text):
+            lines = text.splitlines()
+
+            for line in lines:
+                stripped = line.strip()
+                if not stripped or should_skip_line(stripped):
+                    prev_record = None
                     continue
 
-                parsed = parse_row(row)
+                # Ist-Wert der vorherigen Haushaltsstelle?
+                if prev_record is not None:
+                    ist_match = RE_IST_ZEILE.match(stripped)
+                    if ist_match:
+                        prev_record["ist_2024"] = clean_zahl(ist_match.group(1))
+                        prev_record = None
+                        if debug:
+                            print(f"    [Ist-Wert] {ist_match.group(1)}")
+                        continue
+                    else:
+                        prev_record = None  # Nächste Zeile war kein Ist-Wert
+
+                # Haushaltsstelle parsen
+                parsed = parse_titel_line(stripped)
                 if parsed:
                     parsed.update({
-                        "einzelplan":    einzelplan_nr,
-                        "ministerium":   ministerium,
-                        "kapitel":       current_kapitel or "",
-                        "kapitel_name":  current_kapitel_name,
-                        "seite_pdf":     page_num,
-                        "quelle_pdf":    pdf_path.name,
+                        "einzelplan":   einzelplan_nr,
+                        "ministerium":  ministerium,
+                        "kapitel":      current_kapitel,
+                        "kapitel_name": current_kapitel_name,
+                        "seite_pdf":    page_num,
+                        "quelle_pdf":   pdf_path.name,
                     })
                     records.append(parsed)
+                    prev_record = parsed
 
-    print(f"  → {len(records)} Haushaltsstellen extrahiert ({seiten_ohne_tabelle} Seiten ohne Tabelle)")
+                    if debug:
+                        print(
+                            f"    [S.{page_num}] {parsed['titel']} "
+                            f"{parsed['titel_name'][:40]:<40} "
+                            f"2026:{parsed['ansatz_2026']:>12}  "
+                            f"2027:{parsed['ansatz_2027']:>12}"
+                        )
+
+    print(
+        f"  -> {len(records)} Haushaltsstellen  |  "
+        f"{seiten_geskippt} Seiten übersprungen"
+    )
     return records
 
 
 def debug_mode(key: str):
-    """Zeigt Rohzeilen einer einzelnen PDF – zum Verstehen der Struktur."""
+    """Zeigt alle erkannten Haushaltsstellen einer PDF im Detail."""
     pdf_path = PDF_DIR / f"{key}.pdf"
     if not pdf_path.exists():
         print(f"PDF nicht gefunden: {pdf_path}")
         print("Zuerst ausführen: python pipeline/01_download.py --pilot")
         sys.exit(1)
 
-    print(f"\n=== DEBUG-Modus: {pdf_path.name} ===\n")
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages[:10], start=1):
-            orientation = detect_orientation(page)
-            text = page.extract_text() or ""
-            table = page.extract_table()
-            print(f"\n{'='*60}")
-            print(f"Seite {page_num} [{orientation}] – Textauszug:")
-            print(text[:400].replace("\n", " | "))
-            if table:
-                print(f"\nTabelle ({len(table)} Zeilen, erste 5):")
-                for row in table[:5]:
-                    print(f"  {row}")
-            else:
-                print("  → Keine Tabelle erkannt")
+    nr = key.replace("ep_", "").zfill(2) if key.startswith("ep_") else "00"
+    print(f"\n=== DEBUG: {pdf_path.name} ===")
+    records = parse_pdf(pdf_path, nr, debug=True)
+
+    print(f"\n{'='*60}")
+    print(f"Gesamt: {len(records)} Haushaltsstellen erkannt")
+
+    if records:
+        total_2026 = sum(r["ansatz_2026"] or 0 for r in records)
+        total_2027 = sum(r["ansatz_2027"] or 0 for r in records)
+        print(f"Summe Ansatz 2026: {total_2026:>18,.0f} EUR")
+        print(f"Summe Ansatz 2027: {total_2027:>18,.0f} EUR")
+
+        print("\nErste 10 erkannte Stellen:")
+        for r in records[:10]:
+            print(
+                f"  Kap {r['kapitel']} | {r['titel']} | "
+                f"{r['titel_name'][:35]:<35} | 2026: {str(r['ansatz_2026']):>12}"
+            )
 
 
 def main():
     parser = argparse.ArgumentParser(description="PDF-Parser Thüringer Haushaltsplan")
     parser.add_argument("--pilot", action="store_true", help="Nur EP 06 verarbeiten")
-    parser.add_argument("--debug", metavar="KEY", help="Debug-Modus für eine PDF (z.B. ep_06)")
+    parser.add_argument("--debug", metavar="KEY", help="Debug-Modus (z.B. ep_06)")
     args = parser.parse_args()
 
     if args.debug:
         debug_mode(args.debug)
         return
 
-    # PDFs auswählen
-    if args.pilot:
-        pdf_keys = ["ep_06"]
-    else:
-        pdf_keys = [p.stem for p in sorted(PDF_DIR.glob("*.pdf"))]
+    pdf_keys = ["ep_06"] if args.pilot else [p.stem for p in sorted(PDF_DIR.glob("*.pdf"))]
 
     if not pdf_keys:
-        print("Keine PDFs gefunden. Zuerst ausführen: python pipeline/01_download.py")
+        print("Keine PDFs gefunden. Zuerst: python pipeline/01_download.py")
         sys.exit(1)
 
     all_records = []
@@ -263,19 +343,19 @@ def main():
     for key in pdf_keys:
         pdf_path = PDF_DIR / f"{key}.pdf"
         if not pdf_path.exists():
-            print(f"  ✗ {key}.pdf nicht gefunden – übersprungen")
+            print(f"  ! {key}.pdf nicht gefunden – übersprungen")
             continue
         nr = key.replace("ep_", "").zfill(2) if key.startswith("ep_") else "00"
         try:
             records = parse_pdf(pdf_path, nr)
             all_records.extend(records)
         except Exception as e:
-            print(f"  ✗ FEHLER bei {key}: {e}")
+            print(f"  FEHLER bei {key}: {e}")
             fehler.append(key)
 
     if not all_records:
-        print("\n⚠ Keine Daten extrahiert.")
-        print("Tipp: Starte mit --debug ep_06 um die PDF-Struktur zu prüfen.")
+        print("\nKeine Daten extrahiert.")
+        print("Tipp: python pipeline/02_parse.py --debug ep_06")
         sys.exit(1)
 
     df = pd.DataFrame(all_records)
@@ -283,13 +363,11 @@ def main():
 
     print(f"\n{'='*50}")
     print(f"Gesamt: {len(df)} Haushaltsstellen")
-    print(f"Einzelpläne: {df['einzelplan'].nunique()}")
-    print(f"Kapitel: {df['kapitel'].nunique()}")
+    print(f"EPs:    {df['einzelplan'].nunique()}")
+    print(f"Kap.:   {df['kapitel'].nunique()}")
     print(f"Ausgabe: {OUTPUT_CSV}")
-
     if fehler:
         print(f"Fehlgeschlagen: {fehler}")
-
     print("\nWeiter mit: python pipeline/03_build_db.py")
 
 
