@@ -22,7 +22,13 @@ async function initDuckDB() {
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
   conn = await db.connect();
 
-  await conn.query(`INSTALL sqlite; LOAD sqlite;`);
+  // SQLite-Extension laden (in EH-Bundle vorinstalliert – kein INSTALL nötig)
+  try {
+    await conn.query(`LOAD sqlite;`);
+  } catch (_) {
+    await conn.query(`INSTALL sqlite;`);
+    await conn.query(`LOAD sqlite;`);
+  }
   const resp = await fetch(DB_URL);
   if (!resp.ok) throw new Error(`haushalt.db nicht gefunden (${resp.status})`);
   const buf = await resp.arrayBuffer();
