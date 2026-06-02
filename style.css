@@ -333,11 +333,14 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .kachel .k-label { font-size: .78rem; color: var(--gray-600); margin-bottom: .25rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .kachel .k-value { font-size: 1.5rem; font-weight: 700; color: var(--green); }
 .kachel .k-sub   { font-size: .75rem; color: var(--gray-400); margin-top: .2rem; }
-.kachel-personal { border-top-color: #1b5e20; }
-.kachel-stellen  { border-top-color: #0d47a1; }
+.kachel-personal  { border-top-color: #1b5e20; }
+.kachel-stellen   { border-top-color: #0d47a1; }
 .kachel-stellen .k-value { color: #0d47a1; }
-.kachel-invest   { border-top-color: #e65100; }
+.kachel-invest    { border-top-color: #e65100; }
 .kachel-invest .k-value  { color: #e65100; }
+.kachel-schulden  { border-top-color: #b71c1c; }
+.kachel-schulden .k-value { color: #b71c1c; }
+.kachel-schulden:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); transition: all .15s; }
 .skeleton { animation: pulse 1.5s ease-in-out infinite; min-height: 100px; }
 @keyframes pulse {
   0%, 100% { background: var(--gray-100); }
@@ -515,6 +518,66 @@ footer a:hover { color: var(--white); }
   outline: none;
 }
 .modal-actions { display: flex; gap: .6rem; justify-content: flex-end; }
+
+/* ── Treemap-Header mit Jahr-Toggle ─────────────────────────────────────────── */
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: .4rem;
+}
+.chart-year-toggle { display: flex; gap: .4rem; flex-shrink: 0; margin-top: .2rem; }
+.year-btn {
+  background: var(--gray-100);
+  border: 1px solid var(--gray-200);
+  border-radius: 20px;
+  padding: .3rem .9rem;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all .15s;
+}
+.year-btn.active { background: var(--green); color: var(--white); border-color: var(--green); }
+.year-btn:hover:not(.active) { background: var(--green-pale); color: var(--green); }
+
+/* ── Verschuldungs-Modal ─────────────────────────────────────────────────────── */
+.modal-wide { max-width: 720px; width: 95%; max-height: 85vh; overflow-y: auto; }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.2rem;
+}
+.modal-header h3 { margin: 0; font-size: 1.05rem; }
+.modal-close { font-size: 1.1rem; padding: .2rem .6rem; }
+.modal-section-title {
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--gray-800);
+  border-left: 3px solid var(--green);
+  padding-left: .6rem;
+  margin: 1.2rem 0 .6rem;
+}
+.schulden-kacheln {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: .8rem;
+  margin-bottom: .5rem;
+}
+.schulden-kachel {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: .8rem 1rem;
+}
+.sk-label { font-size: .72rem; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: .04em; }
+.sk-value { font-size: 1rem; font-weight: 700; color: var(--gray-800); margin: .25rem 0 .15rem; word-break: break-all; }
+.sk-rot   { color: #b71c1c; }
+.sk-sub   { font-size: .7rem; color: var(--gray-400); }
+.modal-hinweis { font-size: .72rem; color: var(--gray-400); margin-top: 1rem; line-height: 1.5; border-top: 1px solid var(--gray-100); padding-top: .8rem; }
 
 /* ── Gesamtplan-Tab ──────────────────────────────────────────────────────────── */
 .gp-summary {

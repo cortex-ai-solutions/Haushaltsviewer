@@ -7,6 +7,18 @@ import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0
 
 const DB_URL = "./data/haushalt.db";
 
+// ── Schuldendaten aus §2 ThürHhG + Kreditfinanzierungsplan (Seite 25) ─────────
+// Quelle: Thüringer Haushaltsgesetz 2026/2027
+const SCHULDEN_REF = {
+  netto_2026:          866_832_200,   // §2(1) ThürHhG
+  netto_2027:          551_493_900,   // §2(1) ThürHhG
+  brutto_aufnahme_2026: 1_776_800_000, // Teil III Gesamtplan
+  tilgung_2026:          910_000_000,  // §2(2) ThürHhG
+  brutto_aufnahme_2027: 1_275_600_000, // Teil III Gesamtplan
+  tilgung_2027:          724_100_000,  // §2(2) ThürHhG
+  kassenkredit_limit_pct: 12,          // §2(4) = 12% des festgestellten Betrags
+};
+
 let db   = null;
 let conn = null;
 
@@ -109,7 +121,7 @@ async function fillKacheln() {
   const grid = document.getElementById("kacheln-grid");
 
   // Gesamthaushalt aus Referenz (§1 ThürHhG), Detail-Summen aus haushaltsstellen
-  const [gpRow, hRow, sRow] = await Promise.all([
+  const [gpRow, hRow, sRow, zinsenRow] = await Promise.all([
     query(`
       SELECT SUM(ausgaben_2026) AS gesamt_ref, SUM(ausgaben_2027) AS gesamt_ref27
       FROM haus.gesamtplan_referenz
@@ -126,13 +138,19 @@ async function fillKacheln() {
       FROM haus.stellenuebersicht
       WHERE jahr=2026 AND typ='Gesamt' AND kapitel != 'GESAMT'
     `).catch(() => [{ total: null }]),
+    query(`
+      SELECT SUM(ansatz_2026) AS zinsen26, SUM(ansatz_2027) AS zinsen27
+      FROM haus.haushaltsstellen
+      WHERE einzelplan='17' AND titel LIKE '575%'
+    `).catch(() => [{ zinsen26: null, zinsen27: null }]),
   ]);
 
-  // Gesamthaushalt: offizielle §1-Summe aus gesamtplan_referenz, Fallback auf meta.json
-  const gesamtRef = gpRow[0]?.gesamt_ref ?? null;
-  const h = hRow[0];
+  // Gesamthaushalt: offizielle §1-Summe aus gesamtplan_referenz
+  const gesamtRef  = gpRow[0]?.gesamt_ref ?? null;
+  const h          = hRow[0];
   const planstellen = sRow[0]?.total ?? null;
-  // Personalanteil bezogen auf offizielle Ausgaben (nicht auf Einnahmen+Ausgaben zusammen)
+  const zinsen26   = zinsenRow[0]?.zinsen26 ?? null;
+  // Personalanteil bezogen auf offizielle Ausgaben
   const personalPct = gesamtRef ? ((h.personal / gesamtRef) * 100).toFixed(1) : "–";
 
   grid.innerHTML = `
@@ -166,6 +184,13 @@ async function fillKacheln() {
       <div class="k-value">${h.kapitel_n}</div>
       <div class="k-sub">Haushaltskapitel</div>
     </div>
+    <div class="kachel kachel-schulden" id="k-verschuldung" role="button" tabindex="0"
+         title="Details zu Schulden &amp; Zinsen anzeigen" style="cursor:pointer">
+      <div class="k-icon">📉</div>
+      <div class="k-label">Neuverschuldung 2026</div>
+      <div class="k-value">${fmtEUR(SCHULDEN_REF.netto_2026, 1)}</div>
+      <div class="k-sub">Zinslast: ${zinsen26 ? fmtEUR(zinsen26, 0) : "–"} · Details →</div>
+    </div>
   `;
 }
 
@@ -192,15 +217,26 @@ async function fillDropdowns() {
 }
 
 // ── Treemap ───────────────────────────────────────────────────────────────────
-async function renderTreemap() {
+let _treemapJahr = "2026";
+
+async function renderTreemap(jahr = _treemapJahr) {
+  _treemapJahr = jahr;
   const container = document.getElementById("treemap-container");
-  // Nur Ausgaben (HGr 4-9) für die Treemap-Größen –
-  // nicht Einnahmen mitsummieren, da HGr 0-3 sonst EP 17 (Steuern) aufbläht.
+
+  // Jahr-Toggle-Buttons aktualisieren
+  document.querySelectorAll(".year-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.year === jahr)
+  );
+
+  const col = `ansatz_${jahr}`;
+  // Nur Ausgaben (HGr 4-9), 0-Werte filtern damit Squarify stabil bleibt
   const rows = await query(`
-    SELECT ministerium, SUM(ansatz_2026) AS summe
+    SELECT ministerium, SUM(${col}) AS summe
     FROM haus.haushaltsstellen
     WHERE hauptgruppe IN ('4','5','6','7','8','9')
-    GROUP BY ministerium ORDER BY summe DESC
+    GROUP BY ministerium
+    HAVING summe > 0
+    ORDER BY summe DESC
   `);
 
   const total = rows.reduce((s, r) => s + (r.summe || 0), 0);
@@ -248,23 +284,46 @@ async function renderTreemap() {
     return result;
   }
 
-  const items = rows.map((r, i) => ({
-    name: r.ministerium, val: r.summe || 0, color: COLORS[i % COLORS.length],
-  }));
+  // Nur positive Werte, mindestens 1 EUR (Schutz gegen Squarify-Division-by-Zero)
+  const items = rows
+    .filter(r => (r.summe || 0) > 0)
+    .map((r, i) => ({ name: r.ministerium, val: r.summe, color: COLORS[i % COLORS.length] }));
+
+  if (!items.length) {
+    container.innerHTML = `<p style="color:var(--gray-400);padding:1rem">Keine Daten.</p>`;
+    return;
+  }
+
   const cells = squarify(items, { x: 0, y: 0, w: W, h: H });
 
   container.innerHTML = "";
   cells.forEach(c => {
+    // Mindestgröße für Darstellung: 8×8 px
+    if (c.w < 8 || c.h < 8) return;
+
     const div = document.createElement("div");
     div.className = "treemap-cell";
-    div.style.cssText = `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;background:${c.color}`;
-    const label = c.name.split(" ").slice(-2).join(" ");
-    div.innerHTML = `<div class="cell-name">${label}</div><div class="cell-value">${fmtEUR(c.val)}</div>`;
+    // Math.round verhindert Sub-Pixel-Risse zwischen Zellen
+    div.style.cssText =
+      `left:${Math.round(c.x)}px;top:${Math.round(c.y)}px;` +
+      `width:${Math.round(c.w)}px;height:${Math.round(c.h)}px;` +
+      `background:${c.color}`;
+
+    // Kurzbezeichnung: letztes oder letzten zwei Wörter des Ministeriumsnamens
+    const words = c.name.split(" ");
+    const label = words.length <= 2 ? c.name : words.slice(-2).join(" ");
+
+    // Text nur anzeigen wenn Zelle groß genug
+    const showText = c.w > 60 && c.h > 32;
+    div.innerHTML = showText
+      ? `<div class="cell-name">${label}</div><div class="cell-value">${fmtEUR(c.val)}</div>`
+      : "";
     div.title = `${c.name}: ${fmtEURFull(c.val)}`;
+
     div.addEventListener("click", () => {
       switchTab("haushalt");
       document.getElementById("f-search").value = "";
-      // EP aus name raussuchen
+      document.getElementById("f-jahr").value = `ansatz_${jahr}`;
       runHaushaltExplorer({ search: c.name.split(" ").pop() });
     });
     container.appendChild(div);
@@ -348,6 +407,105 @@ async function renderStellenBarChart() {
       runStellenExplorer();
     });
   });
+}
+
+// ── Verschuldungs-Modal ───────────────────────────────────────────────────────
+let _schuldenRendered = false;
+
+async function renderVerschuldungDetails() {
+  if (_schuldenRendered) return;
+  _schuldenRendered = true;
+
+  // Zinsaufwendungen aus DB laden
+  const zinsenRows = await query(`
+    SELECT titel, titel_name, ansatz_2026, ansatz_2027
+    FROM haus.haushaltsstellen
+    WHERE einzelplan='17' AND titel LIKE '575%'
+    ORDER BY ansatz_2026 DESC
+  `).catch(() => []);
+
+  const zinsen26 = zinsenRows.reduce((s, r) => s + (r.ansatz_2026 || 0), 0);
+  const zinsen27 = zinsenRows.reduce((s, r) => s + (r.ansatz_2027 || 0), 0);
+
+  // ── Kennzahlen-Kacheln ────────────────────────────────────────────────────
+  document.getElementById("schulden-kacheln").innerHTML = `
+    <div class="schulden-kachel">
+      <div class="sk-label">Nettoneuverschuldung 2026</div>
+      <div class="sk-value sk-rot">${fmtEURFull(SCHULDEN_REF.netto_2026)}</div>
+      <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
+    </div>
+    <div class="schulden-kachel">
+      <div class="sk-label">Nettoneuverschuldung 2027</div>
+      <div class="sk-value sk-rot">${fmtEURFull(SCHULDEN_REF.netto_2027)}</div>
+      <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
+    </div>
+    <div class="schulden-kachel">
+      <div class="sk-label">Zinsaufwendungen 2026</div>
+      <div class="sk-value">${fmtEURFull(zinsen26)}</div>
+      <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
+    </div>
+    <div class="schulden-kachel">
+      <div class="sk-label">Zinsaufwendungen 2027</div>
+      <div class="sk-value">${fmtEURFull(zinsen27)}</div>
+      <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
+    </div>
+  `;
+
+  // ── Kreditfinanzierungsplan-Chart ─────────────────────────────────────────
+  const kreditData = [
+    { label: "Brutto-Aufnahme 2026", wert: SCHULDEN_REF.brutto_aufnahme_2026, typ: "aufnahme" },
+    { label: "Tilgung 2026",         wert: SCHULDEN_REF.tilgung_2026,         typ: "tilgung"  },
+    { label: "Netto 2026",           wert: SCHULDEN_REF.netto_2026,           typ: "netto"    },
+    { label: "Brutto-Aufnahme 2027", wert: SCHULDEN_REF.brutto_aufnahme_2027, typ: "aufnahme" },
+    { label: "Tilgung 2027",         wert: SCHULDEN_REF.tilgung_2027,         typ: "tilgung"  },
+    { label: "Netto 2027",           wert: SCHULDEN_REF.netto_2027,           typ: "netto"    },
+  ];
+  const maxK = Math.max(...kreditData.map(d => d.wert));
+  const kreditColors = { aufnahme: "#c62828", tilgung: "#2e7d32", netto: "#e65100" };
+
+  document.getElementById("schulden-kredit-chart").innerHTML = `
+    <div style="padding:.5rem 0">
+      ${kreditData.map(d => `
+        <div style="display:flex;align-items:center;gap:.8rem;margin:.35rem 0;">
+          <div style="width:180px;font-size:.8rem;color:var(--gray-600);text-align:right;flex-shrink:0">${d.label}</div>
+          <div style="flex:1;background:var(--gray-100);border-radius:3px;height:22px;overflow:hidden;">
+            <div style="width:${(d.wert/maxK*100).toFixed(1)}%;background:${kreditColors[d.typ]};height:100%;border-radius:3px"></div>
+          </div>
+          <div style="width:140px;font-size:.8rem;font-variant-numeric:tabular-nums;color:var(--gray-800);text-align:right">${fmtEURFull(d.wert)}</div>
+        </div>`).join("")}
+      <p style="font-size:.72rem;color:var(--gray-400);margin-top:.5rem">
+        Quelle: §2 ThürHhG + Teil III Gesamtplan (Kreditfinanzierungsplan) · Beträge gerundet
+      </p>
+    </div>
+  `;
+
+  // ── Zinsen-Tabelle ────────────────────────────────────────────────────────
+  if (zinsenRows.length) {
+    const tbody = zinsenRows.map(r => `
+      <tr>
+        <td>${r.titel}</td>
+        <td>${r.titel_name}</td>
+        <td class="num">${fmtEURFull(r.ansatz_2026)}</td>
+        <td class="num">${fmtEURFull(r.ansatz_2027)}</td>
+      </tr>`).join("");
+
+    document.getElementById("schulden-zinsen-table").innerHTML = `
+      <table style="width:100%;font-size:.83rem">
+        <thead><tr>
+          <th style="text-align:left;padding:.4rem .6rem;background:var(--gray-100)">Titel</th>
+          <th style="text-align:left;padding:.4rem .6rem;background:var(--gray-100)">Bezeichnung</th>
+          <th style="text-align:right;padding:.4rem .6rem;background:var(--gray-100)">Ansatz 2026</th>
+          <th style="text-align:right;padding:.4rem .6rem;background:var(--gray-100)">Ansatz 2027</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+        <tfoot><tr style="font-weight:700;background:var(--gray-100)">
+          <td colspan="2" style="padding:.4rem .6rem">Gesamt Zinsaufwendungen</td>
+          <td class="num" style="padding:.4rem .6rem">${fmtEURFull(zinsen26)}</td>
+          <td class="num" style="padding:.4rem .6rem">${fmtEURFull(zinsen27)}</td>
+        </tr></tfoot>
+      </table>
+    `;
+  }
 }
 
 // ── Tab-Switching ─────────────────────────────────────────────────────────────
@@ -492,6 +650,11 @@ async function renderGesamtplanTab() {
   `;
 
   container.innerHTML = html;
+}
+
+async function openSchuldenModal() {
+  document.getElementById("schulden-modal").classList.remove("hidden");
+  await renderVerschuldungDetails();
 }
 
 function fmtAbw(ist, soll) {
@@ -814,6 +977,23 @@ function initUI() {
   });
   document.getElementById("s-bezeichnung").addEventListener("keydown", e => {
     if (e.key === "Enter") runStellenExplorer();
+  });
+
+  // Verschuldungs-Kachel → Modal öffnen
+  document.getElementById("kacheln-grid").addEventListener("click", e => {
+    if (e.target.closest("#k-verschuldung")) openSchuldenModal();
+  });
+  document.getElementById("schulden-close").addEventListener("click", () => {
+    document.getElementById("schulden-modal").classList.add("hidden");
+  });
+  document.getElementById("schulden-modal").addEventListener("click", e => {
+    if (e.target === document.getElementById("schulden-modal"))
+      document.getElementById("schulden-modal").classList.add("hidden");
+  });
+
+  // Treemap Jahr-Toggle
+  document.querySelectorAll(".year-btn").forEach(btn => {
+    btn.addEventListener("click", () => renderTreemap(btn.dataset.year));
   });
 
   // Antwort-Schließen
