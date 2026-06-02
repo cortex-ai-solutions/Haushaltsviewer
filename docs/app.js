@@ -402,65 +402,60 @@ async function renderEpDetail(ep, name, jahr) {
 }
 
 // ── Stellenplan-Balkendiagramm ────────────────────────────────────────────────
+// Verwendet gesamtplan_referenz statt stellenuebersicht, da stellenuebersicht
+// für viele EPs (z.B. EP04 Bildung) falsche/unvollständige Werte enthält.
+// Die Gesamtplan-Referenz (Seite 134-139) hat die offiziellen Planstellen.
 async function renderStellenBarChart() {
   const container = document.getElementById("stellen-bar-container");
+
   const rows = await query(`
-    SELECT kapitel, typ, stellen
-    FROM haus.stellenuebersicht
-    WHERE jahr = 2026 AND kapitel != 'GESAMT'
-    ORDER BY kapitel, typ
+    SELECT einzelplan, bezeichnung,
+           COALESCE(beamte_soll_2026, 0) AS beamte,
+           COALESCE(an_soll_2026, 0)     AS tarif,
+           COALESCE(gesamt_soll_2026, 0) AS gesamt
+    FROM haus.gesamtplan_referenz
+    WHERE COALESCE(gesamt_soll_2026, 0) > 0
+    ORDER BY gesamt DESC
   `).catch(() => []);
 
   if (!rows.length) {
-    container.innerHTML = `<p style="color:var(--gray-400);padding:1rem">Keine Stellenplan-Daten vorhanden.</p>`;
+    container.innerHTML = `<p style="color:var(--gray-400);padding:1rem">Keine Planstellen-Daten vorhanden.</p>`;
     return;
   }
 
-  // Daten nach Kapitel gruppieren
-  const kaps = {};
-  rows.forEach(r => {
-    if (!kaps[r.kapitel]) kaps[r.kapitel] = { Beamter: 0, Tarifbeschäftigter: 0, Gesamt: 0 };
-    kaps[r.kapitel][r.typ] = r.stellen || 0;
-  });
-
-  const kapList = Object.keys(kaps).sort();
-  const maxVal  = Math.max(...kapList.map(k => kaps[k].Gesamt || kaps[k].Beamter + kaps[k].Tarifbeschäftigter));
-
-  // Kapitel-Namen aus DB holen
-  const kapNamen = {};
-  try {
-    const kn = await query(`SELECT kapitel, name FROM haus.kapitel`);
-    kn.forEach(r => { kapNamen[r.kapitel] = r.name; });
-  } catch (_) {}
+  const maxVal = Math.max(...rows.map(r => r.gesamt));
 
   let html = `
     <div class="stellen-legend">
       <span class="leg-dot" style="background:#1b5e20"></span> Beamte
       <span class="leg-dot" style="background:#4caf50;margin-left:1rem"></span> Tarifbeschäftigte
     </div>
+    <p class="chart-subtitle" style="margin:.4rem 0 .8rem">
+      Quelle: §1 ThürHhG Stellenübersicht Gesamtplan · Klick auf Balken → Detailansicht
+    </p>
     <div class="stellen-bars">
   `;
 
-  kapList.forEach(kap => {
-    const d      = kaps[kap];
-    const gesamt = d.Gesamt || (d.Beamter + d["Tarifbeschäftigter"]);
-    const pctB   = maxVal > 0 ? (d.Beamter / maxVal * 100).toFixed(1) : 0;
-    const pctT   = maxVal > 0 ? (d["Tarifbeschäftigter"] / maxVal * 100).toFixed(1) : 0;
-    const name   = kapNamen[kap] || kap;
+  rows.forEach(r => {
+    const pctB   = maxVal > 0 ? (r.beamte / maxVal * 100).toFixed(1) : 0;
+    const pctT   = maxVal > 0 ? (r.tarif  / maxVal * 100).toFixed(1) : 0;
+    const epKurz = EP_KURZ[r.einzelplan] || `EP${r.einzelplan}`;
 
     html += `
-      <div class="stellen-row" data-kap="${kap}">
-        <div class="stellen-label" title="${name}">
-          <span class="kap-nr">${kap}</span>
-          <span class="kap-name">${name.substring(0, 40)}</span>
+      <div class="stellen-row" data-ep="${r.einzelplan}">
+        <div class="stellen-label" title="${r.bezeichnung || epKurz}">
+          <span class="kap-nr">${epKurz}</span>
+          <span class="kap-name">${(r.bezeichnung || epKurz).substring(0, 38)}</span>
         </div>
         <div class="stellen-bar-wrap">
           <div class="stellen-bar-bg">
-            <div class="stellen-bar beamte" style="width:${pctB}%" title="${fmtN(d.Beamter)} Beamte"></div>
-            <div class="stellen-bar tarif"  style="width:${pctT}%;margin-top:2px" title="${fmtN(d['Tarifbeschäftigter'])} Tarifbeschäftigte"></div>
+            <div class="stellen-bar beamte" style="width:${pctB}%"
+                 title="${fmtN(r.beamte)} Beamte"></div>
+            <div class="stellen-bar tarif"  style="width:${pctT}%;margin-top:2px"
+                 title="${fmtN(r.tarif)} Tarifbeschäftigte"></div>
           </div>
         </div>
-        <div class="stellen-total">${fmtN(gesamt)}</div>
+        <div class="stellen-total">${fmtN(r.gesamt)}</div>
       </div>
     `;
   });
@@ -468,15 +463,14 @@ async function renderStellenBarChart() {
   html += `</div>`;
   container.innerHTML = html;
 
-  // Klick → Stellen-Tab mit EP-Filter öffnen (Kapitel-Nr. → EP aus ersten 2 Ziffern)
-  container.querySelectorAll(".stellen-row").forEach(row => {
+  // Klick → Stellen-Detail nach EP filtern (data-ep aus gesamtplan_referenz)
+  container.querySelectorAll(".stellen-row[data-ep]").forEach(row => {
     row.addEventListener("click", () => {
-      const kap = row.dataset.kap;
-      const ep  = kap ? kap.substring(0, 2) : "";
-      switchTab("stellen");
+      const ep = row.dataset.ep || "";
       if (el("s-ep")) el("s-ep").value = ep;
       if (el("s-typ")) el("s-typ").value = "";
-      runStellenExplorer();
+      runStellenExplorer().catch(() => {});
+      el("stellen-result")?.scrollIntoView({ behavior: "smooth" });
     });
   });
 }
@@ -582,7 +576,7 @@ async function renderVerschuldungDetails() {
 
 // ── Tab-Switching ─────────────────────────────────────────────────────────────
 let _stellenTabLoaded  = false;
-let _strukturTabLoaded = false;
+let _strukturTabLoaded = true;   // Struktur ist Standard-Tab, wird sofort in boot() geladen
 
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t =>
@@ -1090,7 +1084,8 @@ async function boot() {
     fillKacheln().catch(e      => console.warn("fillKacheln:", e)),
     fillDropdowns().catch(e    => console.warn("fillDropdowns:", e)),
   ]);
-  // 4. Explorer initial befüllen (Haushalt sofort, Rest lazy beim Tab-Klick)
+  // 4. Initiales Rendering: Struktur (Standard-Tab) + Haushalt im Hintergrund
+  renderTreemap().catch(e => console.warn("Treemap:", e));
   runHaushaltExplorer().catch(e => console.warn("Explorer:", e));
 }
 
