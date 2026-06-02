@@ -79,11 +79,12 @@
   </div>
 </section>
 
-<!-- ── Explorer (Tabs: Haushalt | Stellen) ──────────────────────────────────── -->
+<!-- ── Explorer (Tabs) ──────────────────────────────────────────────────────── -->
 <section class="explorer-section">
   <div class="tab-bar">
-    <button class="tab active" data-tab="haushalt">💰 Haushaltsstellen</button>
-    <button class="tab"        data-tab="stellen" >👥 Planstellen</button>
+    <button class="tab active" data-tab="haushalt"  >💰 Haushaltsstellen</button>
+    <button class="tab"        data-tab="stellen"   >👥 Planstellen</button>
+    <button class="tab"        data-tab="struktur"  >📊 Haushaltsstruktur</button>
     <button class="tab"        data-tab="gesamtplan">📋 Gesamtplan</button>
   </div>
 
@@ -133,10 +134,18 @@
 
   <!-- Tab: Planstellen -->
   <div id="tab-stellen" class="tab-panel hidden">
+    <!-- Übersichts-Balkendiagramm -->
+    <div class="stellen-overview-bar">
+      <h3 class="tab-section-title">Planstellen-Übersicht 2026 – Beamte vs. Tarifbeschäftigte</h3>
+      <p class="chart-subtitle">nach Kapitel · Klick auf Balken = Detailansicht</p>
+      <div id="stellen-bar-container"></div>
+    </div>
+    <!-- Detailfilter -->
+    <h3 class="tab-section-title" style="margin-top:1.5rem">Planstellen-Detail</h3>
     <div class="filter-row">
       <div class="filter-group">
-        <label for="s-kapitel">Kapitel</label>
-        <select id="s-kapitel"><option value="">Alle</option></select>
+        <label for="s-ep">Ministerium</label>
+        <select id="s-ep"><option value="">Alle Ministerien</option></select>
       </div>
       <div class="filter-group">
         <label for="s-typ">Beschäftigungsart</label>
@@ -158,34 +167,26 @@
     </div>
     <div id="stellen-result"></div>
   </div>
-</section>
 
-<!-- ── Stellenplan-Übersicht (Diagramm) ─────────────────────────────────────── -->
-<section class="chart-section" id="stellen-chart-section">
-  <h2>Planstellen 2026 – Beamte vs. Tarifbeschäftigte</h2>
-  <p class="chart-subtitle">nach Kapitel · Klick auf Balken = Detailansicht</p>
-  <div id="stellen-bar-container"></div>
-</section>
-
-<!-- ── Treemap ───────────────────────────────────────────────────────────────── -->
-<section class="chart-section">
-  <div class="chart-header">
-    <div>
-      <h2>Haushaltsstruktur – Ministerien</h2>
-      <p class="chart-subtitle">nach Gesamtausgaben (HGr 4–9) · Klick für Detailansicht</p>
+  <!-- Tab: Haushaltsstruktur (Treemap) -->
+  <div id="tab-struktur" class="tab-panel hidden">
+    <div class="chart-header" style="margin-bottom:.6rem">
+      <div>
+        <p class="chart-subtitle" style="margin:0">nach Gesamtausgaben (HGr 4–9) · Klick auf Ministerium für Details</p>
+      </div>
+      <div class="chart-year-toggle" id="struktur-year-toggle">
+        <button class="year-btn active" data-year="2026">2026</button>
+        <button class="year-btn"        data-year="2027">2027</button>
+      </div>
     </div>
-    <div class="chart-year-toggle">
-      <button class="year-btn active" data-year="2026">2026</button>
-      <button class="year-btn" data-year="2027">2027</button>
+    <div id="treemap-container"></div>
+    <div id="treemap-ep-detail" class="treemap-ep-detail hidden">
+      <div class="ep-detail-header">
+        <span id="ep-detail-title">Einzelplan</span>
+        <button id="ep-detail-close" class="btn-ghost" style="padding:.2rem .6rem">✕</button>
+      </div>
+      <div id="ep-detail-table"></div>
     </div>
-  </div>
-  <div id="treemap-container"></div>
-  <div id="treemap-ep-detail" class="treemap-ep-detail hidden">
-    <div class="ep-detail-header">
-      <span id="ep-detail-title">Einzelplan</span>
-      <button id="ep-detail-close" class="btn-ghost" style="padding:.2rem .6rem">✕</button>
-    </div>
-    <div id="ep-detail-table"></div>
   </div>
 </section>
 

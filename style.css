@@ -583,6 +583,17 @@ footer a:hover { color: var(--white); }
 .sk-sub   { font-size: .7rem; color: var(--gray-400); }
 .modal-hinweis { font-size: .72rem; color: var(--gray-400); margin-top: 1rem; line-height: 1.5; border-top: 1px solid var(--gray-100); padding-top: .8rem; }
 
+/* ── Tab-Sektions-Titel ──────────────────────────────────────────────────────── */
+.tab-section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gray-800);
+  border-left: 4px solid var(--green);
+  padding-left: .6rem;
+  margin-bottom: .8rem;
+}
+.stellen-overview-bar { margin-bottom: 1rem; }
+
 /* ── EP-Detail unter Treemap ─────────────────────────────────────────────────── */
 .treemap-ep-detail {
   margin-top: 1.2rem;

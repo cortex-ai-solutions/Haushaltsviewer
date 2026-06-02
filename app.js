@@ -7,6 +7,25 @@ import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0
 
 const DB_URL = "./data/haushalt.db";
 
+// Kurznamen für Treemap-Beschriftung (EP-Nummer → kompakter Name)
+const EP_KURZ = {
+  "01": "Landtag",
+  "02": "Staatskanzlei",
+  "03": "Inneres",
+  "04": "Bildung",
+  "05": "Justiz",
+  "06": "Finanzen",
+  "07": "Wirtschaft",
+  "08": "Soziales",
+  "09": "Umwelt",
+  "10": "Digitales",
+  "11": "Rechnungshof",
+  "12": "Verfassungsgericht",
+  "16": "IuK",
+  "17": "Finanzverwaltung",
+  "18": "Hochbau",
+};
+
 // ── Schuldendaten aus §2 ThürHhG + Kreditfinanzierungsplan (Seite 25) ─────────
 // Quelle: Thüringer Haushaltsgesetz 2026/2027
 const SCHULDEN_REF = {
@@ -204,23 +223,16 @@ async function fillKacheln(jahr = _kachelnJahr) {
 
 // ── Dropdowns befüllen ────────────────────────────────────────────────────────
 async function fillDropdowns() {
-  // Ministerien für Haushalt-Tab
   const eps = await query(`SELECT nr, name FROM haus.einzelplaene ORDER BY nr`);
-  const selEp = document.getElementById("f-ep");
+
+  // Haushalt-Tab: Ministeriums-Dropdown
   eps.forEach(ep => {
-    const o = new Option(`EP ${ep.nr} – ${ep.name}`, ep.nr);
-    selEp.appendChild(o);
+    el("f-ep")?.appendChild(new Option(`EP ${ep.nr} – ${ep.name}`, ep.nr));
   });
 
-  // Kapitel für Stellen-Tab
-  const kaps = await query(`
-    SELECT DISTINCT kapitel FROM haus.stellenplan
-    WHERE kapitel IS NOT NULL ORDER BY kapitel
-  `).catch(() => []);
-  const selKap = document.getElementById("s-kapitel");
-  kaps.forEach(k => {
-    const o = new Option(k.kapitel, k.kapitel);
-    selKap.appendChild(o);
+  // Stellen-Tab: gleiches Dropdown mit EP-Ministerien
+  eps.forEach(ep => {
+    el("s-ep")?.appendChild(new Option(`EP ${ep.nr} – ${ep.name}`, ep.nr));
   });
 }
 
@@ -231,8 +243,8 @@ async function renderTreemap(jahr = _treemapJahr) {
   _treemapJahr = jahr;
   const container = document.getElementById("treemap-container");
 
-  // Nur die Treemap-eigenen Jahr-Buttons aktualisieren
-  document.querySelectorAll(".chart-section .year-btn").forEach(b =>
+  // Treemap-eigene Jahr-Buttons aktualisieren
+  document.querySelectorAll("#struktur-year-toggle .year-btn").forEach(b =>
     b.classList.toggle("active", b.dataset.year === jahr)
   );
 
@@ -322,9 +334,8 @@ async function renderTreemap(jahr = _treemapJahr) {
       `width:${Math.round(c.w)}px;height:${Math.round(c.h)}px;` +
       `background:${c.color}`;
 
-    // Kurzbezeichnung: letztes oder letzten zwei Wörter des Ministeriumsnamens
-    const words = c.name.split(" ");
-    const label = words.length <= 2 ? c.name : words.slice(-2).join(" ");
+    // Kurzname aus EP_KURZ-Tabelle, Fallback auf letztes Wort des vollen Namens
+    const label = EP_KURZ[c.ep] || c.name.split(" ").pop();
 
     // Text nur anzeigen wenn Zelle groß genug
     const showText = c.w > 60 && c.h > 32;
@@ -352,9 +363,7 @@ async function renderEpDetail(ep, name, jahr) {
 
   const col = `ansatz_${jahr}`;
   const rows = await query(`
-    SELECT hauptgruppe_name, kapitel_name,
-           titel, titel_name,
-           ${col} AS betrag
+    SELECT hauptgruppe_name, titel, titel_name, ${col} AS betrag
     FROM haus.haushaltsstellen
     WHERE einzelplan = '${esc(ep)}'
       AND hauptgruppe IN ('4','5','6','7','8','9')
@@ -372,7 +381,7 @@ async function renderEpDetail(ep, name, jahr) {
   const tbody = rows.map(r => `
     <tr>
       <td class="small-text">${r.hauptgruppe_name || "–"}</td>
-      <td class="small-text">${r.kapitel_name || "–"}</td>
+      <td><span class="kap-badge" style="font-size:.72rem">${r.titel || "–"}</span></td>
       <td>${r.titel_name || "–"}</td>
       <td class="num">${fmtEURFull(r.betrag)}</td>
     </tr>`).join("");
@@ -380,15 +389,15 @@ async function renderEpDetail(ep, name, jahr) {
   tableEl.innerHTML = `
     <table class="ep-detail-tbl">
       <thead><tr>
-        <th>Art</th><th>Kapitel</th><th>Bezeichnung</th><th class="num">Betrag</th>
+        <th>Ausgabenart</th><th>Titel</th><th>Bezeichnung</th><th class="num">Betrag ${jahr}</th>
       </tr></thead>
       <tbody>${tbody}</tbody>
       <tfoot><tr class="tfoot-row">
-        <td colspan="3">Top ${rows.length} Ausgabentitel (${col})</td>
+        <td colspan="3">Top ${rows.length} Ausgabentitel</td>
         <td class="num">${fmtEURFull(total)}</td>
       </tr></tfoot>
     </table>
-    <p class="gp-hinweis">Nur Titel > 0 EUR · Ausgaben HGr. 4–9 · max. 100 Einträge</p>
+    <p class="gp-hinweis">Nur Positionen > 0 EUR · HGr. 4–9 · max. 100 Einträge</p>
   `;
 }
 
@@ -459,13 +468,14 @@ async function renderStellenBarChart() {
   html += `</div>`;
   container.innerHTML = html;
 
-  // Klick → Stellen-Tab mit Kapitel-Filter öffnen
+  // Klick → Stellen-Tab mit EP-Filter öffnen (Kapitel-Nr. → EP aus ersten 2 Ziffern)
   container.querySelectorAll(".stellen-row").forEach(row => {
     row.addEventListener("click", () => {
       const kap = row.dataset.kap;
+      const ep  = kap ? kap.substring(0, 2) : "";
       switchTab("stellen");
-      document.getElementById("s-kapitel").value = kap;
-      document.getElementById("s-typ").value = "";
+      if (el("s-ep")) el("s-ep").value = ep;
+      if (el("s-typ")) el("s-typ").value = "";
       runStellenExplorer();
     });
   });
@@ -571,14 +581,32 @@ async function renderVerschuldungDetails() {
 }
 
 // ── Tab-Switching ─────────────────────────────────────────────────────────────
+let _stellenTabLoaded  = false;
+let _strukturTabLoaded = false;
+
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t =>
     t.classList.toggle("active", t.dataset.tab === name)
   );
-  document.getElementById("tab-haushalt").classList.toggle("hidden",    name !== "haushalt");
-  document.getElementById("tab-stellen").classList.toggle("hidden",     name !== "stellen");
-  document.getElementById("tab-gesamtplan").classList.toggle("hidden",  name !== "gesamtplan");
+  ["haushalt", "stellen", "struktur", "gesamtplan"].forEach(t => {
+    el(`tab-${t}`)?.classList.toggle("hidden", name !== t);
+  });
+
   if (name === "gesamtplan") renderGesamtplanTab();
+
+  // Stellen: Balkendiagramm + Explorer beim ersten Öffnen laden
+  if (name === "stellen" && !_stellenTabLoaded) {
+    _stellenTabLoaded = true;
+    renderStellenBarChart().catch(() => {});
+    runStellenExplorer().catch(() => {});
+  }
+
+  // Struktur: Treemap beim ersten Öffnen rendern
+  if (name === "struktur" && !_strukturTabLoaded) {
+    _strukturTabLoaded = true;
+    renderTreemap().catch(() => {});
+  }
+
   document.querySelector(".explorer-section").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -766,26 +794,26 @@ async function runHaushaltExplorer(overrides = {}) {
 
 // ── Stellenplan-Explorer ──────────────────────────────────────────────────────
 async function runStellenExplorer() {
-  const kap       = document.getElementById("s-kapitel").value;
-  const typ       = document.getElementById("s-typ").value;
-  const besoldung = document.getElementById("s-besoldung").value.trim();
-  const bez       = document.getElementById("s-bezeichnung").value.trim();
+  const ep        = (el("s-ep")?.value || "").trim();
+  const typ       = (el("s-typ")?.value || "").trim();
+  const besoldung = (el("s-besoldung")?.value || "").trim();
+  const bez       = (el("s-bezeichnung")?.value || "").trim();
 
   const cond = [];
-  if (kap)       cond.push(`s.kapitel = '${esc(kap)}'`);
+  if (ep)        cond.push(`s.einzelplan = '${esc(ep)}'`);
   if (typ)       cond.push(`s.typ = '${esc(typ)}'`);
   if (besoldung) cond.push(`LOWER(s.besoldung) LIKE LOWER('%${esc(besoldung)}%')`);
   if (bez)       cond.push(`LOWER(s.bezeichnung) LIKE LOWER('%${esc(bez)}%')`);
 
   const where = cond.length ? "WHERE " + cond.join(" AND ") : "";
   const sql = `
-    SELECT s.kapitel, s.besoldung, s.laufbahn, s.bezeichnung, s.typ,
+    SELECT s.einzelplan, s.kapitel, s.besoldung, s.laufbahn, s.bezeichnung, s.typ,
            s.stellen_2025, s.stellen_2026, s.stellen_2027,
            s.kw_stellen, s.kw_ab_jahr
     FROM haus.stellenplan s
     ${where}
-    ORDER BY s.kapitel, s.typ, s.besoldung DESC, s.stellen_2026 DESC
-    LIMIT 300
+    ORDER BY s.einzelplan, s.typ, s.besoldung DESC, s.stellen_2026 DESC
+    LIMIT 400
   `;
 
   const rows = await query(sql);
@@ -805,11 +833,11 @@ async function runStellenExplorer() {
 
   const tbody = rows.map(r => {
     const kw = r.kw_stellen ? `<span class="kw-badge" title="Künftig wegfallend ab ${r.kw_ab_jahr || '?'}">kw ${r.kw_stellen}</span>` : "";
-    const lbLabel = laufbahnLabel[r.laufbahn] || r.laufbahn || "";
+    const epKurz = EP_KURZ[r.einzelplan] || `EP${r.einzelplan}`;
     return `<tr>
-      <td><span class="kap-badge">${r.kapitel || "–"}</span></td>
+      <td><span class="ep-badge" style="font-size:.72rem" title="EP ${r.einzelplan}">${epKurz}</span></td>
       <td><span class="bes-badge ${r.typ === 'Beamter' ? 'badge-beamter' : 'badge-tarif'}">${r.besoldung || "–"}</span></td>
-      <td class="small-text" title="${lbLabel}">${r.laufbahn || ""}</td>
+      <td class="small-text">${r.laufbahn || r.typ || ""}</td>
       <td>${r.bezeichnung || "–"}${kw}</td>
       <td class="num">${fmtN(r.stellen_2025)}</td>
       <td class="num stellen-2026">${fmtN(r.stellen_2026)}</td>
@@ -819,26 +847,18 @@ async function runStellenExplorer() {
 
   container.innerHTML = `
     <table class="stellen-table">
-      <thead>
-        <tr>
-          <th>Kapitel</th>
-          <th>Gruppe</th>
-          <th>Laufbahn</th>
-          <th>Bezeichnung</th>
-          <th class="num">2025</th>
-          <th class="num">2026</th>
-          <th class="num">2027</th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th>Ministerium</th><th>Gruppe</th><th>Laufbahn/Art</th>
+        <th>Bezeichnung</th>
+        <th class="num">2025</th><th class="num">2026</th><th class="num">2027</th>
+      </tr></thead>
       <tbody>${tbody}</tbody>
-      <tfoot>
-        <tr class="tfoot-row">
-          <td colspan="4">Summe (${rows.length} Positionen)</td>
-          <td class="num">${fmtN(sum25)}</td>
-          <td class="num stellen-2026">${fmtN(sum26)}</td>
-          <td class="num">${fmtN(sum27)}</td>
-        </tr>
-      </tfoot>
+      <tfoot><tr class="tfoot-row">
+        <td colspan="4">Summe (${rows.length} Positionen)</td>
+        <td class="num">${fmtN(sum25)}</td>
+        <td class="num stellen-2026">${fmtN(sum26)}</td>
+        <td class="num">${fmtN(sum27)}</td>
+      </tr></tfoot>
     </table>
   `;
 }
@@ -1000,8 +1020,8 @@ function initUI() {
     btn.addEventListener("click", () => fillKacheln(btn.dataset.year))
   );
 
-  // Treemap Jahr-Toggle
-  document.querySelectorAll(".chart-section .year-btn").forEach(btn =>
+  // Treemap Jahr-Toggle (Struktur-Tab)
+  document.querySelectorAll("#struktur-year-toggle .year-btn").forEach(btn =>
     btn.addEventListener("click", () => renderTreemap(btn.dataset.year))
   );
 
@@ -1026,9 +1046,9 @@ function initUI() {
   el("f-search")?.addEventListener("keydown", e => { if (e.key === "Enter") runHaushaltExplorer(); });
 
   // Stellen-Explorer Filter
-  el("stellen-btn")?.addEventListener("click", () => runStellenExplorer());
-  el("s-kapitel")?.addEventListener("change", () => runStellenExplorer());
-  el("s-typ")?.addEventListener("change",     () => runStellenExplorer());
+  el("stellen-btn")?.addEventListener("click",   () => runStellenExplorer());
+  el("s-ep")?.addEventListener("change",         () => runStellenExplorer());
+  el("s-typ")?.addEventListener("change",        () => runStellenExplorer());
   el("s-besoldung")?.addEventListener("keydown",   e => { if (e.key === "Enter") runStellenExplorer(); });
   el("s-bezeichnung")?.addEventListener("keydown", e => { if (e.key === "Enter") runStellenExplorer(); });
 
@@ -1070,12 +1090,7 @@ async function boot() {
     fillKacheln().catch(e      => console.warn("fillKacheln:", e)),
     fillDropdowns().catch(e    => console.warn("fillDropdowns:", e)),
   ]);
-  await Promise.all([
-    renderTreemap().catch(e         => console.warn("renderTreemap:", e)),
-    renderStellenBarChart().catch(e => console.warn("renderStellenBar:", e)),
-  ]);
-
-  // 4. Explorer initial befüllen (nach Datenladen)
+  // 4. Explorer initial befüllen (Haushalt sofort, Rest lazy beim Tab-Klick)
   runHaushaltExplorer().catch(e => console.warn("Explorer:", e));
 }
 
