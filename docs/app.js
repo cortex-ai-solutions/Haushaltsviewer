@@ -839,28 +839,132 @@ async function runHaushaltExplorer(overrides = {}) {
 
   const where = cond.length ? "WHERE " + cond.join(" AND ") : "";
   const sql = `
-    SELECT e.ministerium, e.kapitel, e.kapitel_name,
+    SELECT e.kapitel, e.kapitel_name,
            e.titel, e.titel_name, e.hauptgruppe_name,
            e.${jahr} AS betrag
     FROM haus.haushaltsstellen e
     ${where}
-    ORDER BY betrag DESC NULLS LAST
-    LIMIT 200
+    ORDER BY e.kapitel, betrag DESC NULLS LAST
+    LIMIT 500
   `;
 
   const rows = await query(sql);
-  renderTable(rows, document.getElementById("explorer-result"), {
-    columns: [
-      { key: "ministerium",      label: "Ministerium" },
-      { key: "kapitel",          label: "Kap." },
-      { key: "titel",            label: "Titel" },
-      { key: "titel_name",       label: "Bezeichnung" },
-      { key: "hauptgruppe_name", label: "Art" },
-      { key: "betrag",           label: "Betrag", num: true, format: fmtEURFull },
-    ],
-    sumCol: "betrag",
-    emptyText: "Keine Treffer – Filter anpassen.",
+  renderHaushaltGrouped(rows, document.getElementById("explorer-result"));
+}
+
+// ── Haushalt-Explorer – gruppierte Kapitel-Ansicht ────────────────────────────
+function renderHaushaltGrouped(rows, container) {
+  if (!rows.length) {
+    container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Keine Treffer – Filter anpassen.</p>`;
+    return;
+  }
+
+  // Nach Kapitel gruppieren, Reihenfolge nach Kapitel-Nummer
+  const groupMap = new Map();
+  rows.forEach(r => {
+    if (!groupMap.has(r.kapitel)) {
+      groupMap.set(r.kapitel, { name: r.kapitel_name || r.kapitel, rows: [], sum: 0 });
+    }
+    const g = groupMap.get(r.kapitel);
+    g.rows.push(r);
+    g.sum += r.betrag || 0;
   });
+
+  const groups = [...groupMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const total  = rows.reduce((s, r) => s + (r.betrag || 0), 0);
+  const limited = rows.length === 500;
+
+  // Toolbar
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                margin-bottom:.6rem;flex-wrap:wrap;gap:.4rem">
+      <span style="font-size:.78rem;color:var(--gray-500)">
+        ${rows.length} Haushaltsstellen · ${groups.length} Kapitel${limited ? " · <em>Anzeige auf 500 begrenzt</em>" : ""}
+      </span>
+      <button id="h-expand-all" class="btn-ghost" style="font-size:.74rem;padding:.25rem .6rem">
+        ▶ Alle aufklappen
+      </button>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="background:var(--gray-100);font-size:.78rem">
+          <th style="width:28px"></th>
+          <th style="padding:.4rem .5rem;text-align:left">Kapitel / Titel</th>
+          <th style="padding:.4rem .5rem;text-align:left">Bezeichnung</th>
+          <th style="padding:.4rem .5rem;text-align:left">Art</th>
+          <th style="padding:.4rem .5rem;text-align:right">Betrag</th>
+        </tr>
+      </thead>
+  `;
+
+  groups.forEach(([kap, g], gi) => {
+    const gid = `hg${gi}`;
+    html += `
+      <tbody>
+        <tr class="hkap-header" data-gid="${gid}"
+            style="cursor:pointer;background:var(--gray-50);border-top:2px solid var(--gray-200)">
+          <td style="padding:.45rem .4rem;text-align:center">
+            <span class="hkap-arrow" style="font-size:.7rem;display:inline-block;transition:transform .18s">▶</span>
+          </td>
+          <td style="padding:.45rem .5rem">
+            <span class="kap-badge">${kap}</span>
+          </td>
+          <td style="padding:.45rem .5rem;font-weight:600;color:var(--gray-800)">${g.name}</td>
+          <td style="padding:.45rem .5rem;font-size:.75rem;color:var(--gray-500)">${g.rows.length} Titel</td>
+          <td style="padding:.45rem .5rem;text-align:right;font-weight:600">${fmtEURFull(g.sum)}</td>
+        </tr>`;
+
+    g.rows.forEach(r => {
+      html += `
+        <tr class="hkap-detail ${gid}" style="display:none;background:#fff">
+          <td style="border-bottom:1px solid var(--gray-100)"></td>
+          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100)">
+            <span style="font-size:.7rem;background:var(--gray-100);color:var(--gray-600);
+                         border-radius:3px;padding:.1rem .35rem;font-family:monospace">${r.titel || "–"}</span>
+          </td>
+          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.82rem">${r.titel_name || "–"}</td>
+          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.75rem;color:var(--gray-500)">${r.hauptgruppe_name || "–"}</td>
+          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${fmtEURFull(r.betrag)}</td>
+        </tr>`;
+    });
+
+    html += `</tbody>`;
+  });
+
+  html += `
+    <tfoot>
+      <tr class="tfoot-row">
+        <td colspan="4" style="padding:.5rem .6rem">Gesamt (${rows.length} Titel · ${groups.length} Kapitel)</td>
+        <td style="padding:.5rem .6rem;text-align:right;font-weight:700">${fmtEURFull(total)}</td>
+      </tr>
+    </tfoot>
+    </table>`;
+
+  container.innerHTML = html;
+
+  // Klick-Handler: einzelnes Kapitel auf-/zuklappen
+  container.querySelectorAll(".hkap-header").forEach(hdr => {
+    hdr.addEventListener("click", () => {
+      const gid    = hdr.dataset.gid;
+      const detail = container.querySelectorAll(`.hkap-detail.${gid}`);
+      const arrow  = hdr.querySelector(".hkap-arrow");
+      const open   = detail[0]?.style.display !== "none";
+      detail.forEach(r => { r.style.display = open ? "none" : ""; });
+      if (arrow) arrow.style.transform = open ? "" : "rotate(90deg)";
+    });
+  });
+
+  // Alle auf-/zuklappen
+  const expandBtn = container.querySelector("#h-expand-all");
+  if (expandBtn) {
+    let allOpen = false;
+    expandBtn.addEventListener("click", () => {
+      allOpen = !allOpen;
+      container.querySelectorAll(".hkap-detail").forEach(r => { r.style.display = allOpen ? "" : "none"; });
+      container.querySelectorAll(".hkap-arrow").forEach(a => { a.style.transform = allOpen ? "rotate(90deg)" : ""; });
+      expandBtn.textContent = allOpen ? "▼ Alle einklappen" : "▶ Alle aufklappen";
+    });
+  }
 }
 
 // ── Stellenplan-Explorer ──────────────────────────────────────────────────────
