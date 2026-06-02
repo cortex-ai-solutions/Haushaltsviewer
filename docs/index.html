@@ -163,8 +163,16 @@
 
 <!-- ── Treemap ───────────────────────────────────────────────────────────────── -->
 <section class="chart-section">
-  <h2>Haushaltsstruktur – Ministerien 2026</h2>
-  <p class="chart-subtitle">nach Gesamtausgaben · Klick für Detailansicht</p>
+  <div class="chart-header">
+    <div>
+      <h2>Haushaltsstruktur – Ministerien</h2>
+      <p class="chart-subtitle">nach Gesamtausgaben (HGr 4–9) · Klick für Detailansicht</p>
+    </div>
+    <div class="chart-year-toggle">
+      <button class="year-btn active" data-year="2026">2026</button>
+      <button class="year-btn" data-year="2027">2027</button>
+    </div>
+  </div>
   <div id="treemap-container"></div>
 </section>
 
@@ -179,6 +187,33 @@
     <p id="footer-stand">Stand: –</p>
   </div>
 </footer>
+
+<!-- ── Verschuldungs-Modal ────────────────────────────────────────────────────── -->
+<div id="schulden-modal" class="modal hidden">
+  <div class="modal-box modal-wide">
+    <div class="modal-header">
+      <h3>🏦 Thüringen – Schulden &amp; Zinsaufwendungen</h3>
+      <button id="schulden-close" class="btn-ghost modal-close">✕</button>
+    </div>
+
+    <!-- Kennzahlen-Leiste -->
+    <div id="schulden-kacheln" class="schulden-kacheln"></div>
+
+    <!-- Nettokreditaufnahme vs. Tilgung -->
+    <h4 class="modal-section-title">Kreditfinanzierungsplan 2026 / 2027</h4>
+    <div id="schulden-kredit-chart"></div>
+
+    <!-- Zinsaufwendungen -->
+    <h4 class="modal-section-title">Zinsaufwendungen im Haushalt</h4>
+    <div id="schulden-zinsen-table"></div>
+
+    <p class="modal-hinweis">
+      Quellen: §1 und §2 Thüringer Haushaltsgesetz 2026/2027 · Kreditfinanzierungsplan (Teil III Gesamtplan) ·
+      Gesamter Schuldenstand (Kreditmarktschulden) aus dem Thüringer Landesschuldenbericht ·
+      Zinsaufwendungen aus den Haushaltsstellen EP 17 Kapitel 1706.
+    </p>
+  </div>
+</div>
 
 <!-- ── API-Key Modal ─────────────────────────────────────────────────────────── -->
 <div id="key-modal" class="modal hidden">
