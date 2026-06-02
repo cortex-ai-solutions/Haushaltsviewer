@@ -852,116 +852,175 @@ async function runHaushaltExplorer(overrides = {}) {
   renderHaushaltGrouped(rows, document.getElementById("explorer-result"));
 }
 
-// ── Haushalt-Explorer – gruppierte Kapitel-Ansicht ────────────────────────────
+// ── Haushalt-Explorer – dreistufige Ansicht: Kapitel → Art → Titel ───────────
 function renderHaushaltGrouped(rows, container) {
   if (!rows.length) {
     container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Keine Treffer – Filter anpassen.</p>`;
     return;
   }
 
-  // Nach Kapitel gruppieren, Reihenfolge nach Kapitel-Nummer
-  const groupMap = new Map();
+  // Hierarchie aufbauen: Kapitel → Ausgabenart (hauptgruppe_name) → Titel
+  const kapMap = new Map();
   rows.forEach(r => {
-    if (!groupMap.has(r.kapitel)) {
-      groupMap.set(r.kapitel, { name: r.kapitel_name || r.kapitel, rows: [], sum: 0 });
+    if (!kapMap.has(r.kapitel)) {
+      kapMap.set(r.kapitel, { name: r.kapitel_name || r.kapitel, arts: new Map(), sum: 0 });
     }
-    const g = groupMap.get(r.kapitel);
-    g.rows.push(r);
-    g.sum += r.betrag || 0;
+    const kap = kapMap.get(r.kapitel);
+    kap.sum += r.betrag || 0;
+
+    const artKey = r.hauptgruppe_name || "Sonstige";
+    if (!kap.arts.has(artKey)) kap.arts.set(artKey, { titelRows: [], sum: 0 });
+    const art = kap.arts.get(artKey);
+    art.titelRows.push(r);
+    art.sum += r.betrag || 0;
   });
 
-  const groups = [...groupMap.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const total  = rows.reduce((s, r) => s + (r.betrag || 0), 0);
+  const kaps    = [...kapMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const total   = rows.reduce((s, r) => s + (r.betrag || 0), 0);
   const limited = rows.length === 500;
 
-  // Toolbar
+  const artIcon = n => {
+    if (!n) return "📋";
+    const l = n.toLowerCase();
+    if (l.includes("personal"))                        return "👥";
+    if (l.includes("sächlich") || l.includes("sach")) return "📦";
+    if (l.includes("zuweis") || l.includes("zuschuss"))return "🤝";
+    if (l.includes("bau"))                             return "🏗️";
+    if (l.includes("invest"))                          return "📈";
+    if (l.includes("schulden") || l.includes("zins")) return "💳";
+    if (l.includes("steuer"))                          return "🏦";
+    return "📋";
+  };
+
   let html = `
     <div style="display:flex;justify-content:space-between;align-items:center;
                 margin-bottom:.6rem;flex-wrap:wrap;gap:.4rem">
       <span style="font-size:.78rem;color:var(--gray-500)">
-        ${rows.length} Haushaltsstellen · ${groups.length} Kapitel${limited ? " · <em>Anzeige auf 500 begrenzt</em>" : ""}
+        ${rows.length} Titel · ${kaps.length} Kapitel${limited ? " · <em>max. 500 angezeigt</em>" : ""}
       </span>
-      <button id="h-expand-all" class="btn-ghost" style="font-size:.74rem;padding:.25rem .6rem">
-        ▶ Alle aufklappen
-      </button>
+      <button id="h-expand-all" class="btn-ghost" style="font-size:.74rem;padding:.25rem .6rem">▶ Alle aufklappen</button>
     </div>
     <table style="width:100%;border-collapse:collapse">
       <thead>
         <tr style="background:var(--gray-100);font-size:.78rem">
-          <th style="width:28px"></th>
-          <th style="padding:.4rem .5rem;text-align:left">Kapitel / Titel</th>
+          <th style="width:22px"></th>
+          <th style="width:22px"></th>
+          <th style="padding:.4rem .5rem;text-align:left">Kapitel / Art / Titel</th>
           <th style="padding:.4rem .5rem;text-align:left">Bezeichnung</th>
-          <th style="padding:.4rem .5rem;text-align:left">Art</th>
           <th style="padding:.4rem .5rem;text-align:right">Betrag</th>
         </tr>
-      </thead>
-  `;
+      </thead>`;
 
-  groups.forEach(([kap, g], gi) => {
-    const gid = `hg${gi}`;
+  kaps.forEach(([kap, kg], ki) => {
+    const kid  = `k${ki}`;
+    const arts = [...kg.arts.entries()].sort(([, a], [, b]) => b.sum - a.sum);
+    const nTitel = arts.reduce((s, [, a]) => s + a.titelRows.length, 0);
+
+    // ── Ebene 1: Kapitel-Header ──────────────────────────────────────────────
     html += `
       <tbody>
-        <tr class="hkap-header" data-gid="${gid}"
+        <tr class="hkap-hdr" data-kid="${kid}"
             style="cursor:pointer;background:var(--gray-50);border-top:2px solid var(--gray-200)">
-          <td style="padding:.45rem .4rem;text-align:center">
-            <span class="hkap-arrow" style="font-size:.7rem;display:inline-block;transition:transform .18s">▶</span>
+          <td style="padding:.45rem .3rem;text-align:center">
+            <span class="hkap-arr" style="font-size:.7rem;display:inline-block;transition:transform .18s">▶</span>
           </td>
-          <td style="padding:.45rem .5rem">
-            <span class="kap-badge">${kap}</span>
+          <td></td>
+          <td style="padding:.45rem .5rem"><span class="kap-badge">${kap}</span></td>
+          <td style="padding:.45rem .5rem;font-weight:600;color:var(--gray-800)">
+            ${kg.name}
+            <span style="font-weight:400;font-size:.73rem;color:var(--gray-400);margin-left:.4rem">${arts.length} Arten · ${nTitel} Titel</span>
           </td>
-          <td style="padding:.45rem .5rem;font-weight:600;color:var(--gray-800)">${g.name}</td>
-          <td style="padding:.45rem .5rem;font-size:.75rem;color:var(--gray-500)">${g.rows.length} Titel</td>
-          <td style="padding:.45rem .5rem;text-align:right;font-weight:600">${fmtEURFull(g.sum)}</td>
+          <td style="padding:.45rem .6rem;text-align:right;font-weight:600">${fmtEURFull(kg.sum)}</td>
         </tr>`;
 
-    g.rows.forEach(r => {
+    arts.forEach(([artName, ag], ai) => {
+      const aid = `${kid}a${ai}`;
+
+      // ── Ebene 2: Art-Header (anfangs verborgen) ──────────────────────────
       html += `
-        <tr class="hkap-detail ${gid}" style="display:none;background:#fff">
-          <td style="border-bottom:1px solid var(--gray-100)"></td>
-          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100)">
-            <span style="font-size:.7rem;background:var(--gray-100);color:var(--gray-600);
-                         border-radius:3px;padding:.1rem .35rem;font-family:monospace">${r.titel || "–"}</span>
+        <tr class="hart-hdr" data-kid="${kid}" data-aid="${aid}"
+            style="display:none;cursor:pointer;background:#f5f7f5">
+          <td style="padding:.35rem .3rem;border-bottom:1px solid var(--gray-100)"></td>
+          <td style="padding:.35rem .3rem;text-align:center;border-bottom:1px solid var(--gray-100)">
+            <span class="hart-arr" style="font-size:.65rem;display:inline-block;transition:transform .18s;color:var(--gray-500)">▶</span>
           </td>
-          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.82rem">${r.titel_name || "–"}</td>
-          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.75rem;color:var(--gray-500)">${r.hauptgruppe_name || "–"}</td>
-          <td style="padding:.32rem .5rem;border-bottom:1px solid var(--gray-100);text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${fmtEURFull(r.betrag)}</td>
+          <td style="padding:.35rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.82rem;color:var(--gray-700)">
+            ${artIcon(artName)} ${artName}
+          </td>
+          <td style="padding:.35rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.73rem;color:var(--gray-400)">${ag.titelRows.length} Titel</td>
+          <td style="padding:.35rem .6rem;border-bottom:1px solid var(--gray-100);text-align:right;font-size:.82rem;font-weight:600;color:var(--gray-700)">${fmtEURFull(ag.sum)}</td>
         </tr>`;
+
+      // ── Ebene 3: Titel-Zeilen (anfangs verborgen) ────────────────────────
+      ag.titelRows.forEach(r => {
+        html += `
+          <tr class="htitel-row" data-kid="${kid}" data-aid="${aid}" style="display:none">
+            <td style="border-bottom:1px solid var(--gray-100)"></td>
+            <td style="border-bottom:1px solid var(--gray-100)"></td>
+            <td style="padding:.28rem .5rem .28rem 1.4rem;border-bottom:1px solid var(--gray-100)">
+              <span style="font-size:.7rem;background:var(--gray-100);color:var(--gray-600);
+                           border-radius:3px;padding:.1rem .35rem;font-family:monospace">${r.titel || "–"}</span>
+            </td>
+            <td style="padding:.28rem .5rem;border-bottom:1px solid var(--gray-100);font-size:.81rem">${r.titel_name || "–"}</td>
+            <td style="padding:.28rem .6rem;border-bottom:1px solid var(--gray-100);text-align:right;
+                       font-size:.81rem;font-variant-numeric:tabular-nums">${fmtEURFull(r.betrag)}</td>
+          </tr>`;
+      });
     });
 
     html += `</tbody>`;
   });
 
   html += `
-    <tfoot>
-      <tr class="tfoot-row">
-        <td colspan="4" style="padding:.5rem .6rem">Gesamt (${rows.length} Titel · ${groups.length} Kapitel)</td>
-        <td style="padding:.5rem .6rem;text-align:right;font-weight:700">${fmtEURFull(total)}</td>
-      </tr>
-    </tfoot>
+    <tfoot><tr class="tfoot-row">
+      <td colspan="4" style="padding:.5rem .6rem">Gesamt (${rows.length} Titel · ${kaps.length} Kapitel)</td>
+      <td style="padding:.5rem .6rem;text-align:right;font-weight:700">${fmtEURFull(total)}</td>
+    </tr></tfoot>
     </table>`;
 
   container.innerHTML = html;
 
-  // Klick-Handler: einzelnes Kapitel auf-/zuklappen
-  container.querySelectorAll(".hkap-header").forEach(hdr => {
+  // ── Event-Handler ──────────────────────────────────────────────────────────
+
+  // Ebene 1: Kapitel-Klick → Art-Header zeigen/verbergen
+  container.querySelectorAll(".hkap-hdr").forEach(hdr => {
     hdr.addEventListener("click", () => {
-      const gid    = hdr.dataset.gid;
-      const detail = container.querySelectorAll(`.hkap-detail.${gid}`);
-      const arrow  = hdr.querySelector(".hkap-arrow");
-      const open   = detail[0]?.style.display !== "none";
-      detail.forEach(r => { r.style.display = open ? "none" : ""; });
-      if (arrow) arrow.style.transform = open ? "" : "rotate(90deg)";
+      const kid  = hdr.dataset.kid;
+      const arts = container.querySelectorAll(`.hart-hdr[data-kid="${kid}"]`);
+      const arr  = hdr.querySelector(".hkap-arr");
+      const open = arts[0]?.style.display !== "none";
+      arts.forEach(a => { a.style.display = open ? "none" : ""; });
+      if (open) {
+        container.querySelectorAll(`.htitel-row[data-kid="${kid}"]`).forEach(r => { r.style.display = "none"; });
+        container.querySelectorAll(`.hart-hdr[data-kid="${kid}"] .hart-arr`).forEach(a => { a.style.transform = ""; });
+      }
+      if (arr) arr.style.transform = open ? "" : "rotate(90deg)";
     });
   });
 
-  // Alle auf-/zuklappen
+  // Ebene 2: Art-Klick → Titel-Zeilen zeigen/verbergen
+  container.querySelectorAll(".hart-hdr").forEach(hdr => {
+    hdr.addEventListener("click", e => {
+      e.stopPropagation();
+      const aid   = hdr.dataset.aid;
+      const titel = container.querySelectorAll(`.htitel-row[data-aid="${aid}"]`);
+      const arr   = hdr.querySelector(".hart-arr");
+      const open  = titel[0]?.style.display !== "none";
+      titel.forEach(r => { r.style.display = open ? "none" : ""; });
+      if (arr) arr.style.transform = open ? "" : "rotate(90deg)";
+    });
+  });
+
+  // Alle aufklappen / einklappen
   const expandBtn = container.querySelector("#h-expand-all");
   if (expandBtn) {
     let allOpen = false;
     expandBtn.addEventListener("click", () => {
       allOpen = !allOpen;
-      container.querySelectorAll(".hkap-detail").forEach(r => { r.style.display = allOpen ? "" : "none"; });
-      container.querySelectorAll(".hkap-arrow").forEach(a => { a.style.transform = allOpen ? "rotate(90deg)" : ""; });
+      container.querySelectorAll(".hart-hdr").forEach(r  => { r.style.display = allOpen ? "" : "none"; });
+      container.querySelectorAll(".htitel-row").forEach(r => { r.style.display = allOpen ? "" : "none"; });
+      container.querySelectorAll(".hkap-arr").forEach(a  => { a.style.transform = allOpen ? "rotate(90deg)" : ""; });
+      container.querySelectorAll(".hart-arr").forEach(a  => { a.style.transform = allOpen ? "rotate(90deg)" : ""; });
       expandBtn.textContent = allOpen ? "▼ Alle einklappen" : "▶ Alle aufklappen";
     });
   }
