@@ -192,6 +192,13 @@ async function fillKacheln() {
       <div class="k-sub">Zinslast: ${zinsen26 ? fmtEUR(zinsen26, 0) : "–"} · Details →</div>
     </div>
   `;
+
+  // Kachel-Klick direkt nach dem Rendern setzen (robuster als Event-Delegation in initUI)
+  const kvEl = document.getElementById("k-verschuldung");
+  if (kvEl) {
+    kvEl.addEventListener("click", openSchuldenModal);
+    kvEl.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") openSchuldenModal(); });
+  }
 }
 
 // ── Dropdowns befüllen ────────────────────────────────────────────────────────
@@ -231,10 +238,10 @@ async function renderTreemap(jahr = _treemapJahr) {
   const col = `ansatz_${jahr}`;
   // Nur Ausgaben (HGr 4-9), 0-Werte filtern damit Squarify stabil bleibt
   const rows = await query(`
-    SELECT ministerium, SUM(${col}) AS summe
+    SELECT einzelplan, ministerium, SUM(${col}) AS summe
     FROM haus.haushaltsstellen
     WHERE hauptgruppe IN ('4','5','6','7','8','9')
-    GROUP BY ministerium
+    GROUP BY einzelplan, ministerium
     HAVING summe > 0
     ORDER BY summe DESC
   `);
@@ -287,7 +294,12 @@ async function renderTreemap(jahr = _treemapJahr) {
   // Nur positive Werte, mindestens 1 EUR (Schutz gegen Squarify-Division-by-Zero)
   const items = rows
     .filter(r => (r.summe || 0) > 0)
-    .map((r, i) => ({ name: r.ministerium, val: r.summe, color: COLORS[i % COLORS.length] }));
+    .map((r, i) => ({
+      name: r.ministerium,
+      ep:   r.einzelplan,
+      val:  r.summe,
+      color: COLORS[i % COLORS.length],
+    }));
 
   if (!items.length) {
     container.innerHTML = `<p style="color:var(--gray-400);padding:1rem">Keine Daten.</p>`;
@@ -322,9 +334,12 @@ async function renderTreemap(jahr = _treemapJahr) {
 
     div.addEventListener("click", () => {
       switchTab("haushalt");
+      // EP-Nummer direkt setzen statt Freitext-Suche → präzise, keine 200-Zeilen-Tabelle
+      document.getElementById("f-ep").value   = c.ep || "";
+      document.getElementById("f-hgr").value  = "";
       document.getElementById("f-search").value = "";
       document.getElementById("f-jahr").value = `ansatz_${jahr}`;
-      runHaushaltExplorer({ search: c.name.split(" ").pop() });
+      runHaushaltExplorer({ ep: c.ep });
     });
     container.appendChild(div);
   });
@@ -979,16 +994,12 @@ function initUI() {
     if (e.key === "Enter") runStellenExplorer();
   });
 
-  // Verschuldungs-Kachel → Modal öffnen
-  document.getElementById("kacheln-grid").addEventListener("click", e => {
-    if (e.target.closest("#k-verschuldung")) openSchuldenModal();
-  });
-  document.getElementById("schulden-close").addEventListener("click", () => {
-    document.getElementById("schulden-modal").classList.add("hidden");
-  });
-  document.getElementById("schulden-modal").addEventListener("click", e => {
-    if (e.target === document.getElementById("schulden-modal"))
-      document.getElementById("schulden-modal").classList.add("hidden");
+  // Verschuldungs-Modal schließen (Kachel-Klick wird direkt in fillKacheln registriert)
+  const schuldenClose = document.getElementById("schulden-close");
+  const schuldenModal  = document.getElementById("schulden-modal");
+  if (schuldenClose) schuldenClose.addEventListener("click", () => schuldenModal?.classList.add("hidden"));
+  if (schuldenModal)  schuldenModal.addEventListener("click", e => {
+    if (e.target === schuldenModal) schuldenModal.classList.add("hidden");
   });
 
   // Treemap Jahr-Toggle

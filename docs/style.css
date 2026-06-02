@@ -234,12 +234,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* ── Tab-Navigation ──────────────────────────────────────────────────────────── */
 .tab-bar {
   display: flex;
-  flex-wrap: wrap;        /* Tabs umbrechen auf kleinen Screens */
   gap: .4rem;
   margin-bottom: 1.2rem;
   border-bottom: 2px solid var(--gray-200);
   padding-bottom: 0;
+  overflow-x: auto;       /* Horizontal scrollbar auf kleinen Screens */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;  /* Firefox: Scrollbar verstecken */
 }
+.tab-bar::-webkit-scrollbar { display: none; } /* Chrome: Scrollbar verstecken */
 .tab {
   background: none;
   border: none;
@@ -252,7 +255,8 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   cursor: pointer;
   border-radius: 6px 6px 0 0;
   transition: all .15s;
-  white-space: nowrap;    /* Tab-Text nicht umbrechen */
+  white-space: nowrap;
+  flex-shrink: 0;         /* Tabs nicht kleiner machen, scrollbar statt wrap */
 }
 .tab:hover { background: var(--green-pale); color: var(--green); }
 .tab.active {
@@ -635,12 +639,12 @@ footer a:hover { color: var(--white); }
 
 /* ── Responsive ──────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .tab { padding: .5rem .8rem; font-size: .82rem; }
+  .tab { padding: .5rem .9rem; font-size: .84rem; }
   .gp-table { font-size: .75rem; }
   .gp-table th, .gp-table td { padding: .3rem .4rem; }
-  /* Gesamtplan-Tabelle: unwichtige Spalten auf Mobile ausblenden */
   .gp-table .gp-hide-mobile { display: none; }
   .gp-summary { flex-direction: column; }
+  .modal-wide { max-height: 92vh; }
 }
 
 @media (max-width: 640px) {
@@ -648,5 +652,6 @@ footer a:hover { color: var(--white); }
   .header-meta { display: none; }
   .filter-row { flex-direction: column; }
   .filter-group { min-width: unset; width: 100%; }
-  .tab { font-size: .78rem; padding: .45rem .65rem; }
+  /* Tabs scrollen horizontal – keine Schriftgrößenänderung nötig */
+  .kacheln-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 }
