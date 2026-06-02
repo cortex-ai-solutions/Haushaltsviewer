@@ -465,12 +465,14 @@ async function renderStellenBarChart() {
 
   // Klick → Stellen-Detail nach EP filtern (data-ep aus gesamtplan_referenz)
   container.querySelectorAll(".stellen-row[data-ep]").forEach(row => {
-    row.addEventListener("click", () => {
+    row.addEventListener("click", async () => {
       const ep = row.dataset.ep || "";
-      if (el("s-ep")) el("s-ep").value = ep;
-      if (el("s-typ")) el("s-typ").value = "";
-      runStellenExplorer().catch(() => {});
-      el("stellen-result")?.scrollIntoView({ behavior: "smooth" });
+      if (el("s-ep"))          el("s-ep").value = ep;
+      if (el("s-typ"))         el("s-typ").value = "";
+      if (el("s-besoldung"))   el("s-besoldung").value = "";
+      if (el("s-bezeichnung")) el("s-bezeichnung").value = "";
+      try { await runStellenExplorer(); } catch (_) {}
+      el("stellen-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   });
 }
@@ -793,6 +795,9 @@ async function runStellenExplorer() {
   const besoldung = (el("s-besoldung")?.value || "").trim();
   const bez       = (el("s-bezeichnung")?.value || "").trim();
 
+  const container = document.getElementById("stellen-result");
+  container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Lade …</p>`;
+
   const cond = [];
   if (ep)        cond.push(`s.einzelplan = '${esc(ep)}'`);
   if (typ)       cond.push(`s.typ = '${esc(typ)}'`);
@@ -811,10 +816,12 @@ async function runStellenExplorer() {
   `;
 
   const rows = await query(sql);
-  const container = document.getElementById("stellen-result");
 
   if (!rows.length) {
-    container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Keine Treffer – Filter anpassen.</p>`;
+    const hinweis = ep
+      ? `Keine Stellenplan-Einträge für EP ${ep} gefunden. Möglicherweise sind für diesen Einzelplan keine detaillierten Stellenplandaten verfügbar.`
+      : "Keine Treffer – Filter anpassen.";
+    container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">${hinweis}</p>`;
     return;
   }
 
@@ -1040,7 +1047,10 @@ function initUI() {
   el("f-search")?.addEventListener("keydown", e => { if (e.key === "Enter") runHaushaltExplorer(); });
 
   // Stellen-Explorer Filter
-  el("stellen-btn")?.addEventListener("click",   () => runStellenExplorer());
+  el("stellen-btn")?.addEventListener("click", async () => {
+    await runStellenExplorer().catch(() => {});
+    el("stellen-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
   el("s-ep")?.addEventListener("change",         () => runStellenExplorer());
   el("s-typ")?.addEventListener("change",        () => runStellenExplorer());
   el("s-besoldung")?.addEventListener("keydown",   e => { if (e.key === "Enter") runStellenExplorer(); });
