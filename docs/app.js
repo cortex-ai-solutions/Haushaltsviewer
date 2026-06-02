@@ -975,105 +975,108 @@ async function handleNLQuery() {
   }
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
-async function boot() {
-  setStatus("⏳ Lade Datenbank …", "info");
-  try {
-    await initDuckDB();
-    clearStatus();
-  } catch (e) {
-    setStatus(
-      `⚠️ Daten nicht gefunden. Bitte zuerst ausführen: python pipeline/02_parse.py --pilot && python pipeline/02b_parse_stellenplan.py --pilot && python pipeline/03_build_db.py`,
-      "error"
-    );
-    document.getElementById("kacheln-grid").innerHTML =
-      `<div class="kachel"><div class="k-label">⚠️ Hinweis</div><div class="k-sub">Datenbank noch nicht generiert.</div></div>`;
-    fillMeta();
-    initUI();
-    return;
-  }
-
-  await Promise.all([fillMeta(), fillKacheln(), fillDropdowns()]);
-  await Promise.all([renderTreemap(), renderStellenBarChart()]);
-  initUI();
-}
-
+// ── Hilfsfunktion ─────────────────────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
 
+// ── Event-Listener – werden sofort beim Laden gesetzt ─────────────────────────
+// WICHTIG: initUI() läuft synchron beim Seitenstart, BEVOR Daten geladen werden.
+// So sind alle Listener garantiert aktiv, unabhängig davon ob später eine
+// async-Funktion (renderTreemap etc.) einen Fehler wirft.
 function initUI() {
-  // ── NL-Suche ────────────────────────────────────────────────────────────────
+  // NL-Suche
   el("nl-btn")?.addEventListener("click", handleNLQuery);
   el("nl-input")?.addEventListener("keydown", e => { if (e.key === "Enter") handleNLQuery(); });
-  document.querySelectorAll(".quick-btn").forEach(btn => {
-    btn.addEventListener("click", () => { el("nl-input").value = btn.dataset.q; handleNLQuery(); });
+  document.querySelectorAll(".quick-btn").forEach(btn =>
+    btn.addEventListener("click", () => { el("nl-input").value = btn.dataset.q; handleNLQuery(); })
+  );
+
+  // Tabs
+  document.querySelectorAll(".tab").forEach(btn =>
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab))
+  );
+
+  // Kacheln Jahr-Toggle (2026 / 2027)
+  document.querySelectorAll("#kacheln-year-toggle .year-btn").forEach(btn =>
+    btn.addEventListener("click", () => fillKacheln(btn.dataset.year))
+  );
+
+  // Treemap Jahr-Toggle
+  document.querySelectorAll(".chart-section .year-btn").forEach(btn =>
+    btn.addEventListener("click", () => renderTreemap(btn.dataset.year))
+  );
+
+  // EP-Detail unter Treemap schließen
+  el("ep-detail-close")?.addEventListener("click", () =>
+    el("treemap-ep-detail")?.classList.add("hidden")
+  );
+
+  // Schulden-Modal schließen (× und Backdrop)
+  el("schulden-close")?.addEventListener("click", () =>
+    el("schulden-modal")?.classList.add("hidden")
+  );
+  el("schulden-modal")?.addEventListener("click", function(e) {
+    if (e.target === this) this.classList.add("hidden");
   });
 
-  // ── Tabs ─────────────────────────────────────────────────────────────────────
-  document.querySelectorAll(".tab").forEach(btn => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-  });
+  // Haushalt-Explorer Filter
+  el("filter-btn")?.addEventListener("click", () => runHaushaltExplorer());
+  el("f-ep")?.addEventListener("change",   () => runHaushaltExplorer());
+  el("f-hgr")?.addEventListener("change",  () => runHaushaltExplorer());
+  el("f-jahr")?.addEventListener("change", () => runHaushaltExplorer());
+  el("f-search")?.addEventListener("keydown", e => { if (e.key === "Enter") runHaushaltExplorer(); });
 
-  // ── Kacheln Jahr-Toggle ──────────────────────────────────────────────────────
-  document.querySelectorAll("#kacheln-year-toggle .year-btn").forEach(btn => {
-    btn.addEventListener("click", () => fillKacheln(btn.dataset.year));
-  });
+  // Stellen-Explorer Filter
+  el("stellen-btn")?.addEventListener("click", () => runStellenExplorer());
+  el("s-kapitel")?.addEventListener("change", () => runStellenExplorer());
+  el("s-typ")?.addEventListener("change",     () => runStellenExplorer());
+  el("s-besoldung")?.addEventListener("keydown",   e => { if (e.key === "Enter") runStellenExplorer(); });
+  el("s-bezeichnung")?.addEventListener("keydown", e => { if (e.key === "Enter") runStellenExplorer(); });
 
-  // ── Haushalt-Explorer ────────────────────────────────────────────────────────
-  // Beim ersten Tab-Öffnen automatisch laden
-  runHaushaltExplorer().catch(() => {});
+  // NL-Antwort schließen
+  el("answer-close")?.addEventListener("click", () => el("answer-section")?.classList.add("hidden"));
 
-  el("filter-btn")?.addEventListener("click", () => runHaushaltExplorer().catch(() => {}));
-  ["f-ep", "f-hgr", "f-jahr"].forEach(id => {
-    el(id)?.addEventListener("change", () => runHaushaltExplorer().catch(() => {}));
-  });
-  el("f-search")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") runHaushaltExplorer().catch(() => {});
-  });
-
-  // ── Stellen-Explorer ─────────────────────────────────────────────────────────
-  el("stellen-btn")?.addEventListener("click", () => runStellenExplorer().catch(() => {}));
-  ["s-kapitel", "s-typ"].forEach(id => {
-    el(id)?.addEventListener("change", () => runStellenExplorer().catch(() => {}));
-  });
-  ["s-besoldung", "s-bezeichnung"].forEach(id => {
-    el(id)?.addEventListener("keydown", e => {
-      if (e.key === "Enter") runStellenExplorer().catch(() => {});
-    });
-  });
-
-  // ── Treemap Jahr-Toggle (Treemap-Buttons, nicht Kacheln-Buttons) ─────────────
-  document.querySelectorAll(".chart-section .year-btn").forEach(btn => {
-    btn.addEventListener("click", () => renderTreemap(btn.dataset.year));
-  });
-
-  // ── EP-Detail unter Treemap ──────────────────────────────────────────────────
-  el("ep-detail-close")?.addEventListener("click", () => {
-    el("treemap-ep-detail")?.classList.add("hidden");
-  });
-
-  // ── Schulden-Modal schließen ─────────────────────────────────────────────────
-  // × Schließen-Button: direkter getElementById-Aufruf (keine Closure-Falle)
-  el("schulden-close")?.addEventListener("click", () => {
-    el("schulden-modal")?.classList.add("hidden");
-  });
-  // Klick auf Backdrop schließt Modal
-  el("schulden-modal")?.addEventListener("click", e => {
-    if (e.target === el("schulden-modal")) el("schulden-modal").classList.add("hidden");
-  });
-
-  // ── Antwort-Bereich schließen ────────────────────────────────────────────────
-  el("answer-close")?.addEventListener("click", () => {
-    el("answer-section")?.classList.add("hidden");
-  });
-
-  // ── API-Key Modal ────────────────────────────────────────────────────────────
+  // API-Key Modal
   el("key-save")?.addEventListener("click", () => {
-    const url = el("worker-url-input").value.trim();
+    const url = el("worker-url-input")?.value.trim();
     if (url) localStorage.setItem("worker_url", url);
     el("key-modal")?.classList.add("hidden");
     handleNLQuery();
   });
   el("key-cancel")?.addEventListener("click", () => el("key-modal")?.classList.add("hidden"));
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+async function boot() {
+  // 1. Event-Listener sofort setzen — unabhängig vom Datenladestand
+  initUI();
+
+  // 2. Datenbank laden
+  setStatus("⏳ Lade Datenbank …", "info");
+  try {
+    await initDuckDB();
+    clearStatus();
+  } catch (e) {
+    setStatus("⚠️ Daten nicht gefunden – bitte Pipeline ausführen.", "error");
+    el("kacheln-grid").innerHTML =
+      `<div class="kachel"><div class="k-label">⚠️ Hinweis</div>
+       <div class="k-sub">Datenbank noch nicht generiert.</div></div>`;
+    fillMeta().catch(() => {});
+    return;
+  }
+
+  // 3. Daten laden – jeder Schritt mit eigenem Fehler-Handling
+  await Promise.all([
+    fillMeta().catch(e         => console.warn("fillMeta:", e)),
+    fillKacheln().catch(e      => console.warn("fillKacheln:", e)),
+    fillDropdowns().catch(e    => console.warn("fillDropdowns:", e)),
+  ]);
+  await Promise.all([
+    renderTreemap().catch(e         => console.warn("renderTreemap:", e)),
+    renderStellenBarChart().catch(e => console.warn("renderStellenBar:", e)),
+  ]);
+
+  // 4. Explorer initial befüllen (nach Datenladen)
+  runHaushaltExplorer().catch(e => console.warn("Explorer:", e));
 }
 
 boot();
