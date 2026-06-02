@@ -915,7 +915,7 @@ function renderBesoldungChart(rows) {
 
   const bars = sorted.map(([bg, { stellen, typ }]) => {
     const hPct  = Math.max((stellen / maxVal) * barH, 2).toFixed(0);
-    const color = typ === "Beamter" ? "#2e7d32" : "#4caf50";
+    const color = typ === "Beamter" ? "#1b5e20" : "#1565c0";
     return `
       <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:26px;max-width:52px">
         <div style="font-size:.62rem;color:var(--gray-600);margin-bottom:2px;line-height:1">${stellen}</div>
@@ -933,8 +933,8 @@ function renderBesoldungChart(rows) {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
         <span style="font-size:.78rem;font-weight:600;color:var(--gray-700)">Stellen 2026 je Besoldungs-/Entgeltgruppe</span>
         <span style="font-size:.72rem;color:var(--gray-500)">
-          <span style="display:inline-block;width:9px;height:9px;background:#2e7d32;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Beamte
-          <span style="display:inline-block;width:9px;height:9px;background:#4caf50;border-radius:2px;margin:0 3px 0 8px;vertical-align:middle"></span>Tarif
+          <span style="display:inline-block;width:9px;height:9px;background:#1b5e20;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Beamte
+          <span style="display:inline-block;width:9px;height:9px;background:#1565c0;border-radius:2px;margin:0 3px 0 8px;vertical-align:middle"></span>Tarif
         </span>
       </div>
       <div style="display:flex;align-items:flex-end;gap:4px;overflow-x:auto;
