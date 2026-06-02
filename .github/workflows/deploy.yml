@@ -1,12 +1,12 @@
 name: Haushaltsplan Pipeline & Deploy
 
 on:
-  push:
-    branches: [main]
   schedule:
     # Jeden 1. Januar neu bauen (neuer Haushalt)
     - cron: "0 6 1 1 *"
-  workflow_dispatch:    # Manuell auslösbar (GitHub → Actions → Run workflow)
+  workflow_dispatch:    # Manuell auslösbar: GitHub → Actions → "Haushaltsplan Pipeline & Deploy"
+  # push: [main] ist DEAKTIVIERT – dieser Workflow lädt alle PDFs und parst sie neu
+  # (dauert ~30 Min). Für schnellen Deploy nutze stattdessen static.yml (Deploy docs/).
 
 permissions:
   contents: write
