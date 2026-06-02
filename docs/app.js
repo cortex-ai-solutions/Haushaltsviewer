@@ -241,6 +241,7 @@ let _treemapJahr = "2026";
 
 async function renderTreemap(jahr = _treemapJahr) {
   _treemapJahr = jahr;
+  renderSankey(jahr).catch(() => {});
   const container = document.getElementById("treemap-container");
 
   // Treemap-eigene Jahr-Buttons aktualisieren
@@ -347,6 +348,115 @@ async function renderTreemap(jahr = _treemapJahr) {
     div.addEventListener("click", () => renderEpDetail(c.ep, c.name, jahr));
     container.appendChild(div);
   });
+}
+
+// ── Sankey: Mittelherkunft → Mittelverwendung ─────────────────────────────────
+async function renderSankey(jahr = _treemapJahr) {
+  const wrap = el("sankey-container");
+  if (!wrap) return;
+
+  const col = `ansatz_${jahr}`;
+  const hgrData = await query(`
+    SELECT hauptgruppe, SUM(${col}) AS summe
+    FROM haus.haushaltsstellen
+    GROUP BY hauptgruppe
+  `).catch(() => []);
+
+  const hgr = {};
+  hgrData.forEach(r => { hgr[r.hauptgruppe] = r.summe || 0; });
+
+  // Tilgung aus §2 ThürHhG (HGr 9 im Parser unvollständig)
+  const tilgung = jahr === "2026" ? SCHULDEN_REF.tilgung_2026 : SCHULDEN_REF.tilgung_2027;
+
+  const revenues = [
+    { name: "Steuern",              value: hgr["0"] || 0, color: "#1b5e20" },
+    { name: "Zuweisungen Bund/EU",  value: hgr["2"] || 0, color: "#1565c0" },
+    { name: "Kreditaufnahme",       value: hgr["3"] || 0, color: "#c62828" },
+    { name: "Verwaltungseinnahmen", value: hgr["1"] || 0, color: "#e65100" },
+  ].filter(r => r.value > 0).sort((a, b) => b.value - a.value);
+
+  const expenditures = [
+    { name: "Zuweisungen & Förderungen", value: hgr["6"] || 0,                         color: "#0d47a1" },
+    { name: "Personalausgaben",          value: hgr["4"] || 0,                         color: "#2e7d32" },
+    { name: "Investitionen & Bau",       value: (hgr["7"] || 0) + (hgr["8"] || 0),    color: "#f57f17" },
+    { name: "Sachausgaben & Zinsen",     value: hgr["5"] || 0,                         color: "#6a1b9a" },
+    { name: "Schuldentilgung",           value: tilgung,                               color: "#546e7a" },
+  ].filter(e => e.value > 0).sort((a, b) => b.value - a.value);
+
+  const totalR = revenues.reduce((s, r) => s + r.value, 0);
+  const totalE = expenditures.reduce((s, e) => s + e.value, 0);
+
+  const W      = Math.max(wrap.clientWidth || 700, 500);
+  const H      = 360;
+  const nodeW  = 14;
+  const gap    = 5;
+  const padV   = 24;
+  const lblW   = Math.min(Math.floor(W * 0.22), 145);
+  const usableH = H - 2 * padV;
+
+  // Nodes positionieren
+  const scaleR = (usableH - gap * (revenues.length    - 1)) / totalR;
+  const scaleE = (usableH - gap * (expenditures.length - 1)) / totalE;
+
+  const srcX = lblW;
+  const tgtX = W - lblW - nodeW;
+
+  let y = padV;
+  revenues.forEach(r => { r.h = Math.max(r.value * scaleR, 2); r.y = y; r.outY = y; y += r.h + gap; });
+  y = padV;
+  expenditures.forEach(e => { e.h = Math.max(e.value * scaleE, 2); e.y = y; e.inY = y; y += e.h + gap; });
+
+  // Links berechnen
+  const links = [];
+  const midX = (srcX + nodeW + tgtX) / 2;
+  revenues.forEach(r => {
+    expenditures.forEach(e => {
+      const val   = r.value * (e.value / totalE);
+      const srcH  = (val / r.value) * r.h;
+      const tgtH  = (val / e.value) * e.h;
+      links.push({ srcX: srcX + nodeW, srcY0: r.outY, srcY1: r.outY + srcH,
+                   tgtX, tgtY0: e.inY, tgtY1: e.inY + tgtH,
+                   color: r.color,
+                   tip: `${r.name} → ${e.name}: ${fmtEUR(val)}` });
+      r.outY += srcH;
+      e.inY  += tgtH;
+    });
+  });
+
+  // SVG aufbauen
+  const pathSVG = links.map(l => {
+    const p = `M${l.srcX},${l.srcY0}C${midX},${l.srcY0} ${midX},${l.tgtY0} ${l.tgtX},${l.tgtY0}` +
+              `L${l.tgtX},${l.tgtY1}C${midX},${l.tgtY1} ${midX},${l.srcY1} ${l.srcX},${l.srcY1}Z`;
+    return `<path d="${p}" fill="${l.color}" fill-opacity="0.28" stroke="none"><title>${l.tip}</title></path>`;
+  }).join("");
+
+  const fs = Math.max(Math.min(Math.floor(W / 65), 12), 9);
+
+  const revSVG = revenues.map(r => {
+    const cy = r.y + r.h / 2;
+    return `<rect x="${srcX}" y="${r.y}" width="${nodeW}" height="${r.h}" fill="${r.color}" rx="2"/>
+      <text x="${srcX - 5}" y="${cy - 5}" text-anchor="end" font-size="${fs}" fill="#333" font-weight="600">${r.name}</text>
+      <text x="${srcX - 5}" y="${cy + 7}" text-anchor="end" font-size="${fs - 1}" fill="#666">${fmtEUR(r.value)}</text>`;
+  }).join("");
+
+  const expSVG = expenditures.map(e => {
+    const cy = e.y + e.h / 2;
+    return `<rect x="${tgtX}" y="${e.y}" width="${nodeW}" height="${e.h}" fill="${e.color}" rx="2"/>
+      <text x="${tgtX + nodeW + 5}" y="${cy - 5}" font-size="${fs}" fill="#333" font-weight="600">${e.name}</text>
+      <text x="${tgtX + nodeW + 5}" y="${cy + 7}" font-size="${fs - 1}" fill="#666">${fmtEUR(e.value)}</text>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">
+      ${pathSVG}${revSVG}${expSVG}
+      <text x="${srcX + nodeW + 8}" y="${padV - 10}" font-size="${fs - 1}" fill="#999">Mittelherkunft</text>
+      <text x="${tgtX - 8}" y="${padV - 10}" text-anchor="end" font-size="${fs - 1}" fill="#999">Mittelverwendung</text>
+    </svg>
+    <p style="font-size:.69rem;color:var(--gray-400);margin:.3rem 0 0;line-height:1.4">
+      Nichtaffektationsprinzip: Alle Einnahmen decken alle Ausgaben gemeinsam –
+      Linien zeigen proportionale Zuordnung, keine direkten Buchungsverbindungen.
+      Schuldentilgung aus §2 ThürHhG ergänzt (im Haushaltsplan-Parser nicht vollständig erfasst).
+    </p>`;
 }
 
 // ── EP-Detail unterhalb Treemap ───────────────────────────────────────────────
