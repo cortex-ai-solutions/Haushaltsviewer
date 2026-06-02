@@ -82,14 +82,14 @@
 <!-- ── Explorer (Tabs) ──────────────────────────────────────────────────────── -->
 <section class="explorer-section">
   <div class="tab-bar">
-    <button class="tab active" data-tab="haushalt"  >💰 Haushaltsstellen</button>
+    <button class="tab active" data-tab="struktur"  >📊 Haushaltsstruktur</button>
+    <button class="tab"        data-tab="haushalt"  >💰 Haushaltsstellen</button>
     <button class="tab"        data-tab="stellen"   >👥 Planstellen</button>
-    <button class="tab"        data-tab="struktur"  >📊 Haushaltsstruktur</button>
     <button class="tab"        data-tab="gesamtplan">📋 Gesamtplan</button>
   </div>
 
-  <!-- Tab: Haushaltsstellen -->
-  <div id="tab-haushalt" class="tab-panel">
+  <!-- Tab: Haushaltsstellen (standardmäßig hidden – Struktur ist der erste Tab) -->
+  <div id="tab-haushalt" class="tab-panel hidden">
     <div class="filter-row">
       <div class="filter-group">
         <label for="f-ep">Ministerium</label>
@@ -168,8 +168,8 @@
     <div id="stellen-result"></div>
   </div>
 
-  <!-- Tab: Haushaltsstruktur (Treemap) -->
-  <div id="tab-struktur" class="tab-panel hidden">
+  <!-- Tab: Haushaltsstruktur (Treemap) — Standard-Tab -->
+  <div id="tab-struktur" class="tab-panel">
     <div class="chart-header" style="margin-bottom:.6rem">
       <div>
         <p class="chart-subtitle" style="margin:0">nach Gesamtausgaben (HGr 4–9) · Klick auf Ministerium für Details</p>
