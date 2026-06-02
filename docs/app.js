@@ -433,12 +433,12 @@ async function renderGesamtplanTab() {
         <tr>
           <th>EP</th>
           <th>Bezeichnung</th>
-          <th class="num">Einnahmen<br>2026</th>
-          <th class="num">Ausgaben 2026<br>(Referenz)</th>
-          <th class="num">Ausgaben 2026<br>(geparst)</th>
+          <th class="num gp-hide-mobile">Einnahmen<br>2026</th>
+          <th class="num">Ausgaben 2026<br>(§1 Referenz)</th>
+          <th class="num gp-hide-mobile">Ausgaben 2026<br>(geparst)</th>
           <th class="num">Abw.%</th>
-          <th class="num">Ausgaben 2027<br>(Referenz)</th>
-          <th class="num">Personalausg.<br>2026</th>
+          <th class="num gp-hide-mobile">Ausgaben 2027<br>(Referenz)</th>
+          <th class="num gp-hide-mobile">Personal<br>2026</th>
         </tr>
       </thead>
       <tbody>
@@ -460,12 +460,12 @@ async function renderGesamtplanTab() {
       <tr>
         <td><span class="ep-badge">EP ${ep}</span></td>
         <td>${row.bezeichnung || "–"}</td>
-        <td class="num">${fmtEURFull(row.einnahmen_2026)}</td>
+        <td class="num gp-hide-mobile">${fmtEURFull(row.einnahmen_2026)}</td>
         <td class="num ref-val">${fmtEURFull(gp26)}</td>
-        <td class="num">${ep26 > 0 ? fmtEURFull(ep26) : "<span class='gp-na'>–</span>"} <span class="gp-n">${nStr}</span></td>
+        <td class="num gp-hide-mobile">${ep26 > 0 ? fmtEURFull(ep26) : "<span class='gp-na'>–</span>"} <span class="gp-n">${nStr}</span></td>
         <td class="num">${abwStr}</td>
-        <td class="num">${fmtEURFull(row.ausgaben_2027)}</td>
-        <td class="num">${fmtEURFull(row.personal_aus_2026)}</td>
+        <td class="num gp-hide-mobile">${fmtEURFull(row.ausgaben_2027)}</td>
+        <td class="num gp-hide-mobile">${fmtEURFull(row.personal_aus_2026)}</td>
       </tr>
     `;
   }
@@ -475,12 +475,12 @@ async function renderGesamtplanTab() {
       <tfoot>
         <tr class="tfoot-row">
           <td colspan="2">Gesamt</td>
-          <td class="num">–</td>
+          <td class="num gp-hide-mobile">–</td>
           <td class="num ref-val">${fmtEURFull(totalGP26)}</td>
-          <td class="num">${fmtEURFull(totalEP26)}</td>
+          <td class="num gp-hide-mobile">${fmtEURFull(totalEP26)}</td>
           <td class="num">${fmtAbw(totalEP26, totalGP26)}</td>
-          <td class="num ref-val">${fmtEURFull(totalGP27)}</td>
-          <td class="num">–</td>
+          <td class="num gp-hide-mobile ref-val">${fmtEURFull(totalGP27)}</td>
+          <td class="num gp-hide-mobile">–</td>
         </tr>
       </tfoot>
     </table>
@@ -795,14 +795,20 @@ function initUI() {
     // lazy: wird bei erstem Klick geladen
   }
 
-  // Haushalt-Explorer
+  // Haushalt-Explorer – Auto-Update bei Dropdown-Änderung, Button und Enter
   document.getElementById("filter-btn").addEventListener("click", () => runHaushaltExplorer());
+  ["f-ep", "f-hgr", "f-jahr"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => runHaushaltExplorer());
+  });
   document.getElementById("f-search").addEventListener("keydown", e => {
     if (e.key === "Enter") runHaushaltExplorer();
   });
 
-  // Stellen-Explorer
+  // Stellen-Explorer – Auto-Update bei Dropdown-Änderung
   document.getElementById("stellen-btn").addEventListener("click", () => runStellenExplorer());
+  ["s-kapitel", "s-typ"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => runStellenExplorer());
+  });
   document.getElementById("s-besoldung").addEventListener("keydown", e => {
     if (e.key === "Enter") runStellenExplorer();
   });
