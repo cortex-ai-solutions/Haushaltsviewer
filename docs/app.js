@@ -277,12 +277,15 @@ async function renderTreemap(jahr = _treemapJahr) {
     let remaining = [...items];
     let { x, y, w, h } = rect;
     while (remaining.length) {
-      const horiz = w >= h;
+      const horiz  = w >= h;
+      // remSum statt total: jeder Streifen bekommt seinen korrekten Anteil
+      // an der verbleibenden Fläche → kein weißer Leerraum mehr
+      const remSum = remaining.reduce((s, it) => s + it.val, 0);
       let row = [], rowSum = 0, best = Infinity;
       for (let i = 0; i < remaining.length; i++) {
         row.push(remaining[i]);
         rowSum += remaining[i].val;
-        const len = horiz ? w * rowSum / total : h * rowSum / total;
+        const len = horiz ? w * rowSum / remSum : h * rowSum / remSum;
         const ratio = row.reduce((wst, it) => {
           const side = (horiz ? h : w) * it.val / rowSum;
           return Math.max(wst, Math.max(len / side, side / len));
@@ -290,7 +293,7 @@ async function renderTreemap(jahr = _treemapJahr) {
         if (ratio > best && row.length > 1) { row.pop(); rowSum -= remaining[i].val; break; }
         best = ratio;
       }
-      const len = horiz ? w * rowSum / total : h * rowSum / total;
+      const len = horiz ? w * rowSum / remSum : h * rowSum / remSum;
       let cur = horiz ? y : x;
       row.forEach(it => {
         const side = (horiz ? h : w) * it.val / rowSum;
