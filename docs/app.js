@@ -472,7 +472,7 @@ async function renderStellenBarChart() {
       if (el("s-besoldung"))   el("s-besoldung").value = "";
       if (el("s-bezeichnung")) el("s-bezeichnung").value = "";
       try { await runStellenExplorer(); } catch (_) {}
-      el("stellen-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      (el("stellen-bg-chart") || el("stellen-result"))?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   });
 }
@@ -882,8 +882,15 @@ async function runStellenExplorer() {
 
 // ── Besoldungsgruppen-Balkendiagramm ──────────────────────────────────────────
 function renderBesoldungChart(rows) {
-  const container = el("stellen-bg-chart");
-  if (!container) return;
+  // div dynamisch erzeugen falls HTML-Cache noch die alte Version liefert
+  let container = el("stellen-bg-chart");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "stellen-bg-chart";
+    const resultDiv = el("stellen-result");
+    if (resultDiv) resultDiv.before(container);
+    else return;
+  }
 
   if (!rows.length) { container.innerHTML = ""; return; }
 
