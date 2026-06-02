@@ -117,40 +117,41 @@ function clearStatus() {
 }
 
 // ── Kacheln befüllen ─────────────────────────────────────────────────────────
-async function fillKacheln() {
-  const grid = document.getElementById("kacheln-grid");
+let _kachelnJahr = "2026";
 
-  // Gesamthaushalt aus Referenz (§1 ThürHhG), Detail-Summen aus haushaltsstellen
+async function fillKacheln(jahr = _kachelnJahr) {
+  _kachelnJahr = jahr;
+  const grid = document.getElementById("kacheln-grid");
+  const title = document.getElementById("kacheln-title");
+  if (title) title.textContent = `Gesamtübersicht ${jahr}`;
+  // Jahr-Toggle aktiv markieren
+  document.querySelectorAll("#kacheln-year-toggle .year-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.year === jahr)
+  );
+
+  const col = `ansatz_${jahr}`;
   const [gpRow, hRow, sRow, zinsenRow] = await Promise.all([
-    query(`
-      SELECT SUM(ausgaben_2026) AS gesamt_ref, SUM(ausgaben_2027) AS gesamt_ref27
-      FROM haus.gesamtplan_referenz
-    `).catch(() => [{ gesamt_ref: null }]),
+    query(`SELECT SUM(ausgaben_${jahr}) AS gesamt_ref FROM haus.gesamtplan_referenz`)
+      .catch(() => [{ gesamt_ref: null }]),
     query(`
       SELECT
-        SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2026 END)          AS personal,
-        SUM(CASE WHEN hauptgruppe IN ('7','8') THEN ansatz_2026 END)  AS invest,
-        COUNT(DISTINCT kapitel)                                        AS kapitel_n
+        SUM(CASE WHEN hauptgruppe='4' THEN ${col} END)          AS personal,
+        SUM(CASE WHEN hauptgruppe IN ('7','8') THEN ${col} END)  AS invest,
+        COUNT(DISTINCT kapitel)                                    AS kapitel_n
       FROM haus.haushaltsstellen
     `),
-    query(`
-      SELECT SUM(stellen) AS total
-      FROM haus.stellenuebersicht
-      WHERE jahr=2026 AND typ='Gesamt' AND kapitel != 'GESAMT'
-    `).catch(() => [{ total: null }]),
-    query(`
-      SELECT SUM(ansatz_2026) AS zinsen26, SUM(ansatz_2027) AS zinsen27
-      FROM haus.haushaltsstellen
-      WHERE einzelplan='17' AND titel LIKE '575%'
-    `).catch(() => [{ zinsen26: null, zinsen27: null }]),
+    query(`SELECT SUM(stellen) AS total FROM haus.stellenuebersicht
+           WHERE jahr=${jahr} AND typ='Gesamt' AND kapitel != 'GESAMT'`)
+      .catch(() => [{ total: null }]),
+    query(`SELECT SUM(${col}) AS zinsen FROM haus.haushaltsstellen
+           WHERE einzelplan='17' AND titel LIKE '575%'`)
+      .catch(() => [{ zinsen: null }]),
   ]);
 
-  // Gesamthaushalt: offizielle §1-Summe aus gesamtplan_referenz
-  const gesamtRef  = gpRow[0]?.gesamt_ref ?? null;
-  const h          = hRow[0];
+  const gesamtRef   = gpRow[0]?.gesamt_ref ?? null;
+  const h           = hRow[0];
   const planstellen = sRow[0]?.total ?? null;
-  const zinsen26   = zinsenRow[0]?.zinsen26 ?? null;
-  // Personalanteil bezogen auf offizielle Ausgaben
+  const zinsen      = zinsenRow[0]?.zinsen ?? null;
   const personalPct = gesamtRef ? ((h.personal / gesamtRef) * 100).toFixed(1) : "–";
 
   grid.innerHTML = `
@@ -189,7 +190,7 @@ async function fillKacheln() {
       <div class="k-icon">📉</div>
       <div class="k-label">Neuverschuldung 2026</div>
       <div class="k-value">${fmtEUR(SCHULDEN_REF.netto_2026, 1)}</div>
-      <div class="k-sub">Zinslast: ${zinsen26 ? fmtEUR(zinsen26, 0) : "–"} · Details →</div>
+      <div class="k-sub">Zinslast: ${zinsen ? fmtEUR(zinsen, 0) : "–"} · Details →</div>
     </div>
   `;
 
@@ -230,8 +231,8 @@ async function renderTreemap(jahr = _treemapJahr) {
   _treemapJahr = jahr;
   const container = document.getElementById("treemap-container");
 
-  // Jahr-Toggle-Buttons aktualisieren
-  document.querySelectorAll(".year-btn").forEach(b =>
+  // Nur die Treemap-eigenen Jahr-Buttons aktualisieren
+  document.querySelectorAll(".chart-section .year-btn").forEach(b =>
     b.classList.toggle("active", b.dataset.year === jahr)
   );
 
@@ -332,17 +333,63 @@ async function renderTreemap(jahr = _treemapJahr) {
       : "";
     div.title = `${c.name}: ${fmtEURFull(c.val)}`;
 
-    div.addEventListener("click", () => {
-      switchTab("haushalt");
-      // EP-Nummer direkt setzen statt Freitext-Suche → präzise, keine 200-Zeilen-Tabelle
-      document.getElementById("f-ep").value   = c.ep || "";
-      document.getElementById("f-hgr").value  = "";
-      document.getElementById("f-search").value = "";
-      document.getElementById("f-jahr").value = `ansatz_${jahr}`;
-      runHaushaltExplorer({ ep: c.ep });
-    });
+    div.addEventListener("click", () => renderEpDetail(c.ep, c.name, jahr));
     container.appendChild(div);
   });
+}
+
+// ── EP-Detail unterhalb Treemap ───────────────────────────────────────────────
+async function renderEpDetail(ep, name, jahr) {
+  const detail = document.getElementById("treemap-ep-detail");
+  const titleEl = document.getElementById("ep-detail-title");
+  const tableEl = document.getElementById("ep-detail-table");
+  if (!detail) return;
+
+  detail.classList.remove("hidden");
+  titleEl.textContent = `EP ${ep} – ${name} · Ausgaben ${jahr}`;
+  tableEl.innerHTML = `<p style="padding:.8rem;color:var(--gray-400)">Lade …</p>`;
+  detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  const col = `ansatz_${jahr}`;
+  const rows = await query(`
+    SELECT hauptgruppe_name, kapitel_name,
+           titel, titel_name,
+           ${col} AS betrag
+    FROM haus.haushaltsstellen
+    WHERE einzelplan = '${esc(ep)}'
+      AND hauptgruppe IN ('4','5','6','7','8','9')
+      AND ${col} > 0
+    ORDER BY betrag DESC
+    LIMIT 100
+  `).catch(() => []);
+
+  if (!rows.length) {
+    tableEl.innerHTML = `<p style="padding:.8rem;color:var(--gray-400)">Keine Ausgaben-Daten für EP ${ep}.</p>`;
+    return;
+  }
+
+  const total = rows.reduce((s, r) => s + (r.betrag || 0), 0);
+  const tbody = rows.map(r => `
+    <tr>
+      <td class="small-text">${r.hauptgruppe_name || "–"}</td>
+      <td class="small-text">${r.kapitel_name || "–"}</td>
+      <td>${r.titel_name || "–"}</td>
+      <td class="num">${fmtEURFull(r.betrag)}</td>
+    </tr>`).join("");
+
+  tableEl.innerHTML = `
+    <table class="ep-detail-tbl">
+      <thead><tr>
+        <th>Art</th><th>Kapitel</th><th>Bezeichnung</th><th class="num">Betrag</th>
+      </tr></thead>
+      <tbody>${tbody}</tbody>
+      <tfoot><tr class="tfoot-row">
+        <td colspan="3">Top ${rows.length} Ausgabentitel (${col})</td>
+        <td class="num">${fmtEURFull(total)}</td>
+      </tr></tfoot>
+    </table>
+    <p class="gp-hinweis">Nur Titel > 0 EUR · Ausgaben HGr. 4–9 · max. 100 Einträge</p>
+  `;
 }
 
 // ── Stellenplan-Balkendiagramm ────────────────────────────────────────────────
@@ -951,77 +998,82 @@ async function boot() {
   initUI();
 }
 
+function el(id) { return document.getElementById(id); }
+
 function initUI() {
-  // NL-Suche
-  document.getElementById("nl-btn").addEventListener("click", handleNLQuery);
-  document.getElementById("nl-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") handleNLQuery();
-  });
+  // ── NL-Suche ────────────────────────────────────────────────────────────────
+  el("nl-btn")?.addEventListener("click", handleNLQuery);
+  el("nl-input")?.addEventListener("keydown", e => { if (e.key === "Enter") handleNLQuery(); });
   document.querySelectorAll(".quick-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.getElementById("nl-input").value = btn.dataset.q;
-      handleNLQuery();
-    });
+    btn.addEventListener("click", () => { el("nl-input").value = btn.dataset.q; handleNLQuery(); });
   });
 
-  // Tab-Switching
+  // ── Tabs ─────────────────────────────────────────────────────────────────────
   document.querySelectorAll(".tab").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
-  // Gesamtplan-Tab vorladen wenn Daten bereit sind
-  if (document.getElementById("tab-gesamtplan")) {
-    // lazy: wird bei erstem Klick geladen
-  }
 
-  // Haushalt-Explorer – Auto-Update bei Dropdown-Änderung, Button und Enter
-  document.getElementById("filter-btn").addEventListener("click", () => runHaushaltExplorer());
+  // ── Kacheln Jahr-Toggle ──────────────────────────────────────────────────────
+  document.querySelectorAll("#kacheln-year-toggle .year-btn").forEach(btn => {
+    btn.addEventListener("click", () => fillKacheln(btn.dataset.year));
+  });
+
+  // ── Haushalt-Explorer ────────────────────────────────────────────────────────
+  // Beim ersten Tab-Öffnen automatisch laden
+  runHaushaltExplorer().catch(() => {});
+
+  el("filter-btn")?.addEventListener("click", () => runHaushaltExplorer().catch(() => {}));
   ["f-ep", "f-hgr", "f-jahr"].forEach(id => {
-    document.getElementById(id).addEventListener("change", () => runHaushaltExplorer());
+    el(id)?.addEventListener("change", () => runHaushaltExplorer().catch(() => {}));
   });
-  document.getElementById("f-search").addEventListener("keydown", e => {
-    if (e.key === "Enter") runHaushaltExplorer();
+  el("f-search")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") runHaushaltExplorer().catch(() => {});
   });
 
-  // Stellen-Explorer – Auto-Update bei Dropdown-Änderung
-  document.getElementById("stellen-btn").addEventListener("click", () => runStellenExplorer());
+  // ── Stellen-Explorer ─────────────────────────────────────────────────────────
+  el("stellen-btn")?.addEventListener("click", () => runStellenExplorer().catch(() => {}));
   ["s-kapitel", "s-typ"].forEach(id => {
-    document.getElementById(id).addEventListener("change", () => runStellenExplorer());
+    el(id)?.addEventListener("change", () => runStellenExplorer().catch(() => {}));
   });
-  document.getElementById("s-besoldung").addEventListener("keydown", e => {
-    if (e.key === "Enter") runStellenExplorer();
-  });
-  document.getElementById("s-bezeichnung").addEventListener("keydown", e => {
-    if (e.key === "Enter") runStellenExplorer();
-  });
-
-  // Verschuldungs-Modal schließen (Kachel-Klick wird direkt in fillKacheln registriert)
-  const schuldenClose = document.getElementById("schulden-close");
-  const schuldenModal  = document.getElementById("schulden-modal");
-  if (schuldenClose) schuldenClose.addEventListener("click", () => schuldenModal?.classList.add("hidden"));
-  if (schuldenModal)  schuldenModal.addEventListener("click", e => {
-    if (e.target === schuldenModal) schuldenModal.classList.add("hidden");
+  ["s-besoldung", "s-bezeichnung"].forEach(id => {
+    el(id)?.addEventListener("keydown", e => {
+      if (e.key === "Enter") runStellenExplorer().catch(() => {});
+    });
   });
 
-  // Treemap Jahr-Toggle
-  document.querySelectorAll(".year-btn").forEach(btn => {
+  // ── Treemap Jahr-Toggle (Treemap-Buttons, nicht Kacheln-Buttons) ─────────────
+  document.querySelectorAll(".chart-section .year-btn").forEach(btn => {
     btn.addEventListener("click", () => renderTreemap(btn.dataset.year));
   });
 
-  // Antwort-Schließen
-  document.getElementById("answer-close").addEventListener("click", () => {
-    document.getElementById("answer-section").classList.add("hidden");
+  // ── EP-Detail unter Treemap ──────────────────────────────────────────────────
+  el("ep-detail-close")?.addEventListener("click", () => {
+    el("treemap-ep-detail")?.classList.add("hidden");
   });
 
-  // Modal
-  document.getElementById("key-save").addEventListener("click", () => {
-    const url = document.getElementById("worker-url-input").value.trim();
+  // ── Schulden-Modal schließen ─────────────────────────────────────────────────
+  // × Schließen-Button: direkter getElementById-Aufruf (keine Closure-Falle)
+  el("schulden-close")?.addEventListener("click", () => {
+    el("schulden-modal")?.classList.add("hidden");
+  });
+  // Klick auf Backdrop schließt Modal
+  el("schulden-modal")?.addEventListener("click", e => {
+    if (e.target === el("schulden-modal")) el("schulden-modal").classList.add("hidden");
+  });
+
+  // ── Antwort-Bereich schließen ────────────────────────────────────────────────
+  el("answer-close")?.addEventListener("click", () => {
+    el("answer-section")?.classList.add("hidden");
+  });
+
+  // ── API-Key Modal ────────────────────────────────────────────────────────────
+  el("key-save")?.addEventListener("click", () => {
+    const url = el("worker-url-input").value.trim();
     if (url) localStorage.setItem("worker_url", url);
-    document.getElementById("key-modal").classList.add("hidden");
+    el("key-modal")?.classList.add("hidden");
     handleNLQuery();
   });
-  document.getElementById("key-cancel").addEventListener("click", () => {
-    document.getElementById("key-modal").classList.add("hidden");
-  });
+  el("key-cancel")?.addEventListener("click", () => el("key-modal")?.classList.add("hidden"));
 }
 
 boot();

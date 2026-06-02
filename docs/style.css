@@ -583,6 +583,47 @@ footer a:hover { color: var(--white); }
 .sk-sub   { font-size: .7rem; color: var(--gray-400); }
 .modal-hinweis { font-size: .72rem; color: var(--gray-400); margin-top: 1rem; line-height: 1.5; border-top: 1px solid var(--gray-100); padding-top: .8rem; }
 
+/* ── EP-Detail unter Treemap ─────────────────────────────────────────────────── */
+.treemap-ep-detail {
+  margin-top: 1.2rem;
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border-top: 3px solid var(--green);
+  overflow: hidden;
+}
+.ep-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .7rem 1rem;
+  background: var(--green-pale);
+  font-weight: 600;
+  font-size: .9rem;
+  color: var(--green);
+}
+.ep-detail-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.ep-detail-tbl th {
+  background: var(--gray-100);
+  padding: .4rem .6rem;
+  text-align: left;
+  font-size: .75rem;
+  color: var(--gray-600);
+  border-bottom: 1px solid var(--gray-200);
+}
+.ep-detail-tbl td {
+  padding: .35rem .6rem;
+  border-bottom: 1px solid var(--gray-100);
+  vertical-align: middle;
+}
+.ep-detail-tbl tr:hover td { background: var(--gray-50); }
+.ep-detail-tbl .tfoot-row td { font-weight: 700; background: var(--gray-100); border-top: 2px solid var(--gray-200); }
+#ep-detail-table { max-height: 400px; overflow-y: auto; }
+
 /* ── Gesamtplan-Tab ──────────────────────────────────────────────────────────── */
 .gp-summary {
   display: flex;

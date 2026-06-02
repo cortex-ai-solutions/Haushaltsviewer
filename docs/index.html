@@ -63,7 +63,13 @@
 
 <!-- ── Kacheln ────────────────────────────────────────────────────────────────── -->
 <section class="kacheln-section">
-  <h2>Gesamtübersicht 2026</h2>
+  <div class="chart-header" style="margin-bottom:.8rem">
+    <h2 id="kacheln-title">Gesamtübersicht 2026</h2>
+    <div class="chart-year-toggle" id="kacheln-year-toggle">
+      <button class="year-btn active" data-year="2026">2026</button>
+      <button class="year-btn"        data-year="2027">2027</button>
+    </div>
+  </div>
   <div id="kacheln-grid" class="kacheln-grid">
     <div class="kachel skeleton"></div>
     <div class="kachel skeleton"></div>
@@ -174,6 +180,13 @@
     </div>
   </div>
   <div id="treemap-container"></div>
+  <div id="treemap-ep-detail" class="treemap-ep-detail hidden">
+    <div class="ep-detail-header">
+      <span id="ep-detail-title">Einzelplan</span>
+      <button id="ep-detail-close" class="btn-ghost" style="padding:.2rem .6rem">✕</button>
+    </div>
+    <div id="ep-detail-table"></div>
+  </div>
 </section>
 
 <!-- ── Footer ───────────────────────────────────────────────────────────────── -->
