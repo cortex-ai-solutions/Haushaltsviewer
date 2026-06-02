@@ -418,6 +418,22 @@ def main():
     export_json_files(df)
 
     # Metadaten
+    # Gesamthaushalt aus Gesamtplan-Referenz (§1 ThürHhG) – nicht aus haushaltsstellen summieren,
+    # da diese Tabelle sowohl Einnahmen (HGr 0-3) als auch Ausgaben (HGr 4-9) enthält.
+    GESAMT_2026_HHG = 14_807_535_300   # §1 ThürHhG 2026/2027
+    GESAMT_2027_HHG = 15_135_886_100
+    if GESAMTPLAN_CSV.exists():
+        try:
+            df_gp_meta = pd.read_csv(GESAMTPLAN_CSV, dtype=str)
+            summe_gp26 = pd.to_numeric(df_gp_meta["ausgaben_2026"], errors="coerce").sum()
+            summe_gp27 = pd.to_numeric(df_gp_meta["ausgaben_2027"], errors="coerce").sum()
+            summe_2026 = float(summe_gp26) if summe_gp26 > 0 else GESAMT_2026_HHG
+            summe_2027 = float(summe_gp27) if summe_gp27 > 0 else GESAMT_2027_HHG
+        except Exception:
+            summe_2026, summe_2027 = GESAMT_2026_HHG, GESAMT_2027_HHG
+    else:
+        summe_2026, summe_2027 = GESAMT_2026_HHG, GESAMT_2027_HHG
+
     meta = {
         "stand":           datetime.now().strftime("%Y-%m-%d"),
         "haushaltsjahr":   "2026/2027",
@@ -426,8 +442,8 @@ def main():
         "haushaltsstellen": int(len(df)),
         "einzelplaene":    int(df["einzelplan"].nunique()),
         "kapitel":         int(df["kapitel"].nunique()),
-        "summe_2026_eur":  float(df["ansatz_2026"].sum()),
-        "summe_2027_eur":  float(df["ansatz_2027"].sum()),
+        "summe_2026_eur":  summe_2026,   # Ausgaben (§1 ThürHhG)
+        "summe_2027_eur":  summe_2027,   # Ausgaben (§1 ThürHhG)
     }
     META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Metadaten: {META_PATH}")

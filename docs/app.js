@@ -108,14 +108,17 @@ function clearStatus() {
 async function fillKacheln() {
   const grid = document.getElementById("kacheln-grid");
 
-  // Haushaltsdaten und Stellendaten parallel laden
-  const [hRow, sRow] = await Promise.all([
+  // Gesamthaushalt aus Referenz (§1 ThürHhG), Detail-Summen aus haushaltsstellen
+  const [gpRow, hRow, sRow] = await Promise.all([
+    query(`
+      SELECT SUM(ausgaben_2026) AS gesamt_ref, SUM(ausgaben_2027) AS gesamt_ref27
+      FROM haus.gesamtplan_referenz
+    `).catch(() => [{ gesamt_ref: null }]),
     query(`
       SELECT
-        SUM(ansatz_2026)                                    AS gesamt,
-        SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2026 END) AS personal,
-        SUM(CASE WHEN hauptgruppe IN ('7','8') THEN ansatz_2026 END) AS invest,
-        COUNT(DISTINCT kapitel)                             AS kapitel_n
+        SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2026 END)          AS personal,
+        SUM(CASE WHEN hauptgruppe IN ('7','8') THEN ansatz_2026 END)  AS invest,
+        COUNT(DISTINCT kapitel)                                        AS kapitel_n
       FROM haus.haushaltsstellen
     `),
     query(`
@@ -125,16 +128,19 @@ async function fillKacheln() {
     `).catch(() => [{ total: null }]),
   ]);
 
+  // Gesamthaushalt: offizielle §1-Summe aus gesamtplan_referenz, Fallback auf meta.json
+  const gesamtRef = gpRow[0]?.gesamt_ref ?? null;
   const h = hRow[0];
   const planstellen = sRow[0]?.total ?? null;
-  const personalPct = h.gesamt ? ((h.personal / h.gesamt) * 100).toFixed(1) : "–";
+  // Personalanteil bezogen auf offizielle Ausgaben (nicht auf Einnahmen+Ausgaben zusammen)
+  const personalPct = gesamtRef ? ((h.personal / gesamtRef) * 100).toFixed(1) : "–";
 
   grid.innerHTML = `
     <div class="kachel">
       <div class="k-icon">🏦</div>
       <div class="k-label">Gesamthaushalt 2026</div>
-      <div class="k-value">${fmtEUR(h.gesamt, 1)}</div>
-      <div class="k-sub">Alle Einzelpläne</div>
+      <div class="k-value">${fmtEUR(gesamtRef, 1)}</div>
+      <div class="k-sub">Ausgaben · §1 ThürHhG</div>
     </div>
     <div class="kachel kachel-personal">
       <div class="k-icon">👥</div>
@@ -188,9 +194,12 @@ async function fillDropdowns() {
 // ── Treemap ───────────────────────────────────────────────────────────────────
 async function renderTreemap() {
   const container = document.getElementById("treemap-container");
+  // Nur Ausgaben (HGr 4-9) für die Treemap-Größen –
+  // nicht Einnahmen mitsummieren, da HGr 0-3 sonst EP 17 (Steuern) aufbläht.
   const rows = await query(`
     SELECT ministerium, SUM(ansatz_2026) AS summe
     FROM haus.haushaltsstellen
+    WHERE hauptgruppe IN ('4','5','6','7','8','9')
     GROUP BY ministerium ORDER BY summe DESC
   `);
 
