@@ -590,11 +590,12 @@ function switchTab(name) {
 
   if (name === "gesamtplan") renderGesamtplanTab();
 
-  // Stellen: Balkendiagramm + Explorer beim ersten Öffnen laden
+  // Stellen: Balkendiagramm zuerst, dann Explorer (sequentiell – kein paralleler DuckDB-Konflikt)
   if (name === "stellen" && !_stellenTabLoaded) {
     _stellenTabLoaded = true;
-    renderStellenBarChart().catch(() => {});
-    runStellenExplorer().catch(() => {});
+    renderStellenBarChart()
+      .then(() => runStellenExplorer())
+      .catch(() => {});
   }
 
   // Struktur: Treemap beim ersten Öffnen rendern
@@ -805,30 +806,41 @@ async function runStellenExplorer() {
   if (bez)       cond.push(`LOWER(s.bezeichnung) LIKE LOWER('%${esc(bez)}%')`);
 
   const where = cond.length ? "WHERE " + cond.join(" AND ") : "";
+  // CAST zu INTEGER verhindert BigInt-Typ aus DuckDB → kein JS-Arithmetik-Fehler
   const sql = `
     SELECT s.einzelplan, s.kapitel, s.besoldung, s.laufbahn, s.bezeichnung, s.typ,
-           s.stellen_2025, s.stellen_2026, s.stellen_2027,
-           s.kw_stellen, s.kw_ab_jahr
+           CAST(COALESCE(s.stellen_2025, 0) AS INTEGER) AS stellen_2025,
+           CAST(COALESCE(s.stellen_2026, 0) AS INTEGER) AS stellen_2026,
+           CAST(COALESCE(s.stellen_2027, 0) AS INTEGER) AS stellen_2027,
+           CAST(s.kw_stellen AS INTEGER) AS kw_stellen,
+           CAST(s.kw_ab_jahr AS INTEGER) AS kw_ab_jahr
     FROM haus.stellenplan s
     ${where}
-    ORDER BY s.einzelplan, s.typ, s.besoldung DESC, s.stellen_2026 DESC
+    ORDER BY s.einzelplan, s.typ, s.besoldung DESC NULLS LAST, s.stellen_2026 DESC NULLS LAST
     LIMIT 400
   `;
 
-  const rows = await query(sql);
+  let rows;
+  try {
+    rows = await query(sql);
+  } catch (e) {
+    console.error("Stellenplan-Query fehlgeschlagen:", e, sql);
+    container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Fehler beim Laden der Stellenplandaten – bitte Seite neu laden.</p>`;
+    return;
+  }
 
   if (!rows.length) {
     const hinweis = ep
-      ? `Keine Stellenplan-Einträge für EP ${ep} gefunden. Möglicherweise sind für diesen Einzelplan keine detaillierten Stellenplandaten verfügbar.`
+      ? `Keine Stellenplan-Einträge für EP ${ep} gefunden.`
       : "Keine Treffer – Filter anpassen.";
     container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">${hinweis}</p>`;
     return;
   }
 
-  // Summen berechnen
-  const sum25 = rows.reduce((s, r) => s + (r.stellen_2025 || 0), 0);
-  const sum26 = rows.reduce((s, r) => s + (r.stellen_2026 || 0), 0);
-  const sum27 = rows.reduce((s, r) => s + (r.stellen_2027 || 0), 0);
+  // Summen berechnen (Number() schützt gegen BigInt-Reste aus DuckDB)
+  const sum25 = rows.reduce((s, r) => s + (Number(r.stellen_2025) || 0), 0);
+  const sum26 = rows.reduce((s, r) => s + (Number(r.stellen_2026) || 0), 0);
+  const sum27 = rows.reduce((s, r) => s + (Number(r.stellen_2027) || 0), 0);
 
   const laufbahnLabel = { hD: "Höherer Dienst", gD: "Gehobener Dienst", mD: "Mittlerer Dienst" };
 
@@ -840,9 +852,9 @@ async function runStellenExplorer() {
       <td><span class="bes-badge ${r.typ === 'Beamter' ? 'badge-beamter' : 'badge-tarif'}">${r.besoldung || "–"}</span></td>
       <td class="small-text">${r.laufbahn || r.typ || ""}</td>
       <td>${r.bezeichnung || "–"}${kw}</td>
-      <td class="num">${fmtN(r.stellen_2025)}</td>
-      <td class="num stellen-2026">${fmtN(r.stellen_2026)}</td>
-      <td class="num">${fmtN(r.stellen_2027)}</td>
+      <td class="num">${fmtN(Number(r.stellen_2025))}</td>
+      <td class="num stellen-2026">${fmtN(Number(r.stellen_2026))}</td>
+      <td class="num">${fmtN(Number(r.stellen_2027))}</td>
     </tr>`;
   }).join("");
 
