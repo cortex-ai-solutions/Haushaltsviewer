@@ -29,6 +29,8 @@ META_PATH       = DATA_DIR / "meta.json"
 STELLEN_CSV     = DATA_DIR / "stellenplan_raw.csv"
 UEBERSICHT_CSV  = DATA_DIR / "stellenuebersicht_raw.csv"
 
+GESAMTPLAN_CSV = DATA_DIR / "gesamtplan_raw.csv"
+
 MINISTERIEN = {
     "01": "Thüringer Landtag",
     "02": "Thüringer Staatskanzlei",
@@ -125,6 +127,33 @@ CREATE TABLE IF NOT EXISTS stellenuebersicht (
 );
 """
 
+CREATE_GESAMTPLAN = """
+CREATE TABLE IF NOT EXISTS gesamtplan_referenz (
+    einzelplan           TEXT PRIMARY KEY,
+    bezeichnung          TEXT,
+    einnahmen_2026       REAL,
+    ausgaben_2026        REAL,
+    personal_aus_2026    REAL,
+    einnahmen_2027       REAL,
+    ausgaben_2027        REAL,
+    soll_einnahmen_2025  REAL,
+    soll_ausgaben_2025   REAL,
+    ist_einnahmen_2024   REAL,
+    ist_ausgaben_2024    REAL,
+    beamte_soll_2025     INTEGER,
+    beamte_soll_2026     INTEGER,
+    beamte_soll_2027     INTEGER,
+    an_soll_2025         INTEGER,
+    an_soll_2026         INTEGER,
+    an_soll_2027         INTEGER,
+    gesamt_soll_2025     INTEGER,
+    gesamt_soll_2026     INTEGER,
+    gesamt_soll_2027     INTEGER,
+    skala                TEXT,
+    quelle_pdf           TEXT
+);
+"""
+
 CREATE_VIEWS = """
 CREATE VIEW IF NOT EXISTS v_personal AS
 SELECT einzelplan, ministerium, kapitel, kapitel_name,
@@ -180,7 +209,7 @@ def build_db(df: pd.DataFrame):
 
     cur.executescript(
         CREATE_HAUSHALTSSTELLEN + CREATE_KAPITEL + CREATE_EINZELPLAENE
-        + CREATE_STELLENPLAN + CREATE_STELLENUEBERSICHT
+        + CREATE_STELLENPLAN + CREATE_STELLENUEBERSICHT + CREATE_GESAMTPLAN
     )
 
     # Einzelpläne
@@ -256,6 +285,38 @@ def build_db(df: pd.DataFrame):
     else:
         print(f"  Stellenübersicht: {UEBERSICHT_CSV.name} nicht gefunden – übersprungen")
 
+    # Gesamtplan-Referenz (Validierungs-Wahrheit)
+    if GESAMTPLAN_CSV.exists():
+        df_gp = pd.read_csv(GESAMTPLAN_CSV, dtype=str)
+        skala = df_gp["skala"].iloc[0] if "skala" in df_gp.columns else "EUR"
+        factor = 1000.0 if skala == "Tsd.EUR" else 1.0
+        eur_cols = [
+            "einnahmen_2026", "ausgaben_2026", "personal_aus_2026",
+            "einnahmen_2027", "ausgaben_2027",
+            "soll_einnahmen_2025", "soll_ausgaben_2025",
+            "ist_einnahmen_2024", "ist_ausgaben_2024",
+        ]
+        int_cols = [
+            "beamte_soll_2025", "beamte_soll_2026", "beamte_soll_2027",
+            "an_soll_2025", "an_soll_2026", "an_soll_2027",
+            "gesamt_soll_2025", "gesamt_soll_2026", "gesamt_soll_2027",
+        ]
+        for col in eur_cols:
+            if col in df_gp.columns:
+                df_gp[col] = pd.to_numeric(df_gp[col], errors="coerce") * factor
+        for col in int_cols:
+            if col in df_gp.columns:
+                df_gp[col] = pd.to_numeric(df_gp[col], errors="coerce")
+        num_cols = eur_cols + int_cols
+        gp_cols = ["einzelplan", "bezeichnung", "quelle_pdf", "skala"] + num_cols
+        df_gp[[c for c in gp_cols if c in df_gp.columns]].to_sql(
+            "gesamtplan_referenz", con, if_exists="append", index=False
+        )
+        print(f"  Gesamtplan-Referenz: {len(df_gp)} Einzelpläne geladen")
+    else:
+        print(f"  Gesamtplan-Referenz: {GESAMTPLAN_CSV.name} nicht gefunden – übersprungen")
+        print(f"  Tipp: python pipeline/02c_parse_gesamtplan.py")
+
     cur.executescript(CREATE_VIEWS + CREATE_INDEX)
     con.commit()
     con.close()
@@ -305,6 +366,28 @@ def export_json_files(df_haus: pd.DataFrame):
         )
         df_u.to_json(docs_data / "stellenuebersicht.json", orient="records", force_ascii=False)
         print(f"  JSON: stellenuebersicht.json ({len(df_u)} Zeilen)")
+
+    # gesamtplan_referenz
+    if GESAMTPLAN_CSV.exists():
+        df_gp = pd.read_csv(GESAMTPLAN_CSV, dtype=str)
+        skala = df_gp["skala"].iloc[0] if "skala" in df_gp.columns else "EUR"
+        factor = 1000.0 if skala == "Tsd.EUR" else 1.0
+        eur_c = ["einnahmen_2026", "ausgaben_2026", "personal_aus_2026",
+                 "einnahmen_2027", "ausgaben_2027",
+                 "soll_einnahmen_2025", "soll_ausgaben_2025",
+                 "ist_einnahmen_2024", "ist_ausgaben_2024"]
+        int_c = ["beamte_soll_2025", "beamte_soll_2026", "beamte_soll_2027",
+                 "an_soll_2025", "an_soll_2026", "an_soll_2027",
+                 "gesamt_soll_2025", "gesamt_soll_2026", "gesamt_soll_2027"]
+        for col in eur_c:
+            if col in df_gp.columns:
+                df_gp[col] = pd.to_numeric(df_gp[col], errors="coerce") * factor
+        for col in int_c:
+            if col in df_gp.columns:
+                df_gp[col] = pd.to_numeric(df_gp[col], errors="coerce")
+        df_gp.to_json(docs_data / "gesamtplan_referenz.json",
+                      orient="records", force_ascii=False)
+        print(f"  JSON: gesamtplan_referenz.json ({len(df_gp)} Zeilen)")
 
 
 def main():

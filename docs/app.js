@@ -28,7 +28,7 @@ async function initDuckDB() {
   // Tabellen aus JSON laden (kein SQLite-Extension nötig – DuckDB WASM native)
   const TABLES = [
     "haushaltsstellen", "kapitel", "einzelplaene",
-    "stellenplan", "stellenuebersicht",
+    "stellenplan", "stellenuebersicht", "gesamtplan_referenz",
   ];
 
   let geladen = 0;
@@ -346,10 +346,150 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t =>
     t.classList.toggle("active", t.dataset.tab === name)
   );
-  document.getElementById("tab-haushalt").classList.toggle("hidden", name !== "haushalt");
-  document.getElementById("tab-stellen").classList.toggle("hidden",  name !== "stellen");
-  // Scroll zum Explorer
+  document.getElementById("tab-haushalt").classList.toggle("hidden",    name !== "haushalt");
+  document.getElementById("tab-stellen").classList.toggle("hidden",     name !== "stellen");
+  document.getElementById("tab-gesamtplan").classList.toggle("hidden",  name !== "gesamtplan");
+  if (name === "gesamtplan") renderGesamtplanTab();
   document.querySelector(".explorer-section").scrollIntoView({ behavior: "smooth" });
+}
+
+// ── Gesamtplan-Referenz-Tab ───────────────────────────────────────────────────
+let _gesamtplanRendered = false;
+
+async function renderGesamtplanTab() {
+  if (_gesamtplanRendered) return;
+  _gesamtplanRendered = true;
+
+  const container = document.getElementById("gesamtplan-result");
+  container.innerHTML = `<p style="padding:1rem;color:var(--gray-400)">Lade Referenzdaten …</p>`;
+
+  // Gesamtplan-Referenz + EP-Parser-Summen parallel holen
+  const [gpRows, epSumRows] = await Promise.all([
+    query(`
+      SELECT einzelplan, bezeichnung,
+             einnahmen_2026, ausgaben_2026, personal_aus_2026,
+             einnahmen_2027, ausgaben_2027
+      FROM haus.gesamtplan_referenz
+      ORDER BY einzelplan
+    `).catch(() => []),
+    query(`
+      SELECT einzelplan,
+             SUM(CASE WHEN hauptgruppe IN ('4','5','6','7','8','9') THEN ansatz_2026 ELSE 0 END) AS ep_aus26,
+             SUM(CASE WHEN hauptgruppe IN ('4','5','6','7','8','9') THEN ansatz_2027 ELSE 0 END) AS ep_aus27,
+             SUM(CASE WHEN hauptgruppe='4' THEN ansatz_2026 ELSE 0 END)  AS ep_pers26,
+             COUNT(*) AS n_stellen
+      FROM haus.haushaltsstellen
+      GROUP BY einzelplan
+    `).catch(() => []),
+  ]);
+
+  if (!gpRows.length) {
+    container.innerHTML = `
+      <p style="padding:1.5rem;color:var(--gray-400)">
+        Gesamtplan-Referenz nicht verfügbar. Bitte zuerst
+        <code>python pipeline/02c_parse_gesamtplan.py</code> ausführen.
+      </p>`;
+    return;
+  }
+
+  // EP-Parser-Summen als Map
+  const epMap = {};
+  epSumRows.forEach(r => { epMap[r.einzelplan] = r; });
+
+  // Gesamtsummen
+  const totalGP26   = gpRows.reduce((s, r) => s + (r.ausgaben_2026 || 0), 0);
+  const totalGP27   = gpRows.reduce((s, r) => s + (r.ausgaben_2027 || 0), 0);
+  const totalEP26   = Object.values(epMap).reduce((s, r) => s + (r.ep_aus26 || 0), 0);
+  const totalEP27   = Object.values(epMap).reduce((s, r) => s + (r.ep_aus27 || 0), 0);
+
+  // Header
+  let html = `
+    <div class="gp-summary">
+      <div class="gp-sum-card">
+        <div class="gp-sum-label">Gesamthaushalt 2026 (§1 ThürHhG)</div>
+        <div class="gp-sum-value">${fmtEUR(totalGP26, 2)}</div>
+      </div>
+      <div class="gp-sum-card">
+        <div class="gp-sum-label">Gesamthaushalt 2027 (§1 ThürHhG)</div>
+        <div class="gp-sum-value">${fmtEUR(totalGP27, 2)}</div>
+      </div>
+      <div class="gp-sum-card gp-sum-parsed">
+        <div class="gp-sum-label">Geparst 2026 (Summe EP-Dateien)</div>
+        <div class="gp-sum-value">${fmtEUR(totalEP26, 2)}</div>
+        <div class="gp-sum-abw">${fmtAbw(totalEP26, totalGP26)}</div>
+      </div>
+    </div>
+    <table class="gp-table">
+      <thead>
+        <tr>
+          <th>EP</th>
+          <th>Bezeichnung</th>
+          <th class="num">Einnahmen<br>2026</th>
+          <th class="num">Ausgaben 2026<br>(Referenz)</th>
+          <th class="num">Ausgaben 2026<br>(geparst)</th>
+          <th class="num">Abw.%</th>
+          <th class="num">Ausgaben 2027<br>(Referenz)</th>
+          <th class="num">Personalausg.<br>2026</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const row of gpRows) {
+    const ep   = row.einzelplan;
+    const ep2  = epMap[ep] || {};
+    const gp26 = row.ausgaben_2026 || 0;
+    const ep26 = ep2.ep_aus26 || 0;
+    const abw  = gp26 > 0 ? (ep26 - gp26) / gp26 * 100 : null;
+    const abwClass = abw === null ? "" : Math.abs(abw) <= 5 ? "abw-ok" : "abw-warn";
+    const abwStr   = abw === null
+      ? "<span class='gp-na'>–</span>"
+      : `<span class="${abwClass}">${abw >= 0 ? "+" : ""}${abw.toFixed(1)} %</span>`;
+    const nStr = ep2.n_stellen ? `(${ep2.n_stellen} Titel)` : "";
+
+    html += `
+      <tr>
+        <td><span class="ep-badge">EP ${ep}</span></td>
+        <td>${row.bezeichnung || "–"}</td>
+        <td class="num">${fmtEURFull(row.einnahmen_2026)}</td>
+        <td class="num ref-val">${fmtEURFull(gp26)}</td>
+        <td class="num">${ep26 > 0 ? fmtEURFull(ep26) : "<span class='gp-na'>–</span>"} <span class="gp-n">${nStr}</span></td>
+        <td class="num">${abwStr}</td>
+        <td class="num">${fmtEURFull(row.ausgaben_2027)}</td>
+        <td class="num">${fmtEURFull(row.personal_aus_2026)}</td>
+      </tr>
+    `;
+  }
+
+  html += `
+      </tbody>
+      <tfoot>
+        <tr class="tfoot-row">
+          <td colspan="2">Gesamt</td>
+          <td class="num">–</td>
+          <td class="num ref-val">${fmtEURFull(totalGP26)}</td>
+          <td class="num">${fmtEURFull(totalEP26)}</td>
+          <td class="num">${fmtAbw(totalEP26, totalGP26)}</td>
+          <td class="num ref-val">${fmtEURFull(totalGP27)}</td>
+          <td class="num">–</td>
+        </tr>
+      </tfoot>
+    </table>
+    <p class="gp-hinweis">
+      Referenz: §1 Thüringer Haushaltsgesetz 2026/2027 (Teil I A Gesamtplan) ·
+      Geparst: Summe aller Haushaltsstellen-Titel HGr. 4–9 je EP ·
+      Abweichungen entstehen durch Einnahmetitel (HGr. 0–3) und Parser-Unschärfen.
+    </p>
+  `;
+
+  container.innerHTML = html;
+}
+
+function fmtAbw(ist, soll) {
+  if (!soll) return "–";
+  const pct = (ist - soll) / soll * 100;
+  const cls = Math.abs(pct) <= 5 ? "abw-ok" : "abw-warn";
+  return `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)} %</span>`;
 }
 
 // ── Haushalt-Explorer ─────────────────────────────────────────────────────────
@@ -641,6 +781,10 @@ function initUI() {
   document.querySelectorAll(".tab").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
+  // Gesamtplan-Tab vorladen wenn Daten bereit sind
+  if (document.getElementById("tab-gesamtplan")) {
+    // lazy: wird bei erstem Klick geladen
+  }
 
   // Haushalt-Explorer
   document.getElementById("filter-btn").addEventListener("click", () => runHaushaltExplorer());

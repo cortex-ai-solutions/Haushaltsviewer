@@ -392,7 +392,11 @@ def main():
         debug_mode(args.debug)
         return
 
-    pdf_keys = ["ep_06"] if args.pilot else [p.stem for p in sorted(PDF_DIR.glob("*.pdf"))]
+    SKIP = {"gesamtplan"}
+    pdf_keys = (
+        ["ep_06"] if args.pilot
+        else [p.stem for p in sorted(PDF_DIR.glob("*.pdf")) if p.stem not in SKIP]
+    )
     if not pdf_keys:
         print("Keine PDFs. Zuerst: python pipeline/01_download.py")
         sys.exit(1)

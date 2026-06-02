@@ -78,6 +78,7 @@
   <div class="tab-bar">
     <button class="tab active" data-tab="haushalt">💰 Haushaltsstellen</button>
     <button class="tab"        data-tab="stellen" >👥 Planstellen</button>
+    <button class="tab"        data-tab="gesamtplan">📋 Gesamtplan</button>
   </div>
 
   <!-- Tab: Haushaltsstellen -->
@@ -113,6 +114,15 @@
       <button id="filter-btn" class="btn-secondary">Anzeigen</button>
     </div>
     <div id="explorer-result"></div>
+  </div>
+
+  <!-- Tab: Gesamtplan-Referenz -->
+  <div id="tab-gesamtplan" class="tab-panel hidden">
+    <p class="chart-subtitle" style="margin:1rem 0 .5rem">
+      Offizielle Referenzwerte aus dem Gesamtplan 2026/2027 · Einnahmen und Ausgaben je Einzelplan ·
+      Abweichung = Summe der geparsten Haushaltsstellen gegenüber dem Gesamtplan.
+    </p>
+    <div id="gesamtplan-result"></div>
   </div>
 
   <!-- Tab: Planstellen -->

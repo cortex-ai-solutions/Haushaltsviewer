@@ -1,11 +1,11 @@
 {
-  "stand": "2026-05-11",
+  "stand": "2026-06-02",
   "haushaltsjahr": "2026/2027",
   "bundesland": "Thüringen",
   "quelle": "https://finanzen.thueringen.de",
-  "haushaltsstellen": 138,
-  "einzelplaene": 1,
-  "kapitel": 4,
-  "summe_2026_eur": 214760100.0,
-  "summe_2027_eur": 222831500.0
+  "haushaltsstellen": 6256,
+  "einzelplaene": 15,
+  "kapitel": 127,
+  "summe_2026_eur": 28885692326.0,
+  "summe_2027_eur": 29495285203.0
 }

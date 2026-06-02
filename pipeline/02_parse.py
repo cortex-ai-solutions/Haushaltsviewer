@@ -74,12 +74,15 @@ RE_IST_ZEILE = re.compile(
     r'^[\s\.]*(\d{1,3}(?:\.\d{3})*)\s*[\.\s]*$'
 )
 
-# Seiten überspringen die nur Erläuterungen/Stellenplan enthalten
+# Nur reine Stellenplan-Erläuterungsseiten überspringen (enthalten keine Haushaltsstellen).
+# HINWEIS: "Verpflichtungsermächtigung.*fällig" (DOTALL) und
+# "Haushaltsbelastungen nach Jahren" wurden entfernt – sie skippten Seiten
+# mit HGr 7/8-Baumaßnahmen, weil VE-Tabellen auf denselben Seiten stehen.
+# Zeilen aus VE-Tabellen werden durch parse_titel_line (kein 3+2-Ziffern-Prefix)
+# und SKIP_LINE_PATTERNS natürlich herausgefiltert.
 SKIP_PATTERNS = [
     re.compile(r'Erläuterungen zu den Änderungen im Stellenplan'),
     re.compile(r'Erläuterungen zu den Änderungen in der Stellenübersicht'),
-    re.compile(r'Haushaltsbelastungen nach Jahren'),
-    re.compile(r'Verpflichtungsermächtigung.*fällig', re.DOTALL),
 ]
 
 # Zeilenmuster die keine Haushaltsstellen sind
@@ -331,7 +334,12 @@ def main():
         debug_mode(args.debug)
         return
 
-    pdf_keys = ["ep_06"] if args.pilot else [p.stem for p in sorted(PDF_DIR.glob("*.pdf"))]
+    # Gesamtplan separat via 02c_parse_gesamtplan.py verarbeiten
+    SKIP = {"gesamtplan"}
+    pdf_keys = (
+        ["ep_06"] if args.pilot
+        else [p.stem for p in sorted(PDF_DIR.glob("*.pdf")) if p.stem not in SKIP]
+    )
 
     if not pdf_keys:
         print("Keine PDFs gefunden. Zuerst: python pipeline/01_download.py")

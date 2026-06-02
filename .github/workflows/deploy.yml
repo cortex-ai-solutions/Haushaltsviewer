@@ -29,24 +29,28 @@ jobs:
       - name: Abhängigkeiten installieren
         run: pip install -r pipeline/requirements.txt
 
-      - name: PDFs herunterladen
+      - name: PDFs herunterladen (Gesamtplan + EP 01-18)
         run: python pipeline/01_download.py
 
-      - name: PDFs parsen
+      - name: Gesamtplan parsen (Referenz-Wahrheit §1 ThürHhG)
+        run: python pipeline/02c_parse_gesamtplan.py
+
+      - name: Haushaltsstellen parsen (EP 01-18)
         run: python pipeline/02_parse.py
 
-      - name: Datenbank bauen
+      - name: Stellenpläne parsen (EP 01-18)
+        run: python pipeline/02b_parse_stellenplan.py
+
+      - name: Datenbank + JSON-Dateien bauen
         run: python pipeline/03_build_db.py
 
-      - name: Daten validieren
+      - name: Daten validieren (gegen Gesamtplan-Referenz)
         run: python pipeline/04_validate.py
 
-      - name: Datenbank nach docs/ kopieren
-        run: |
-          mkdir -p docs/data
-          cp data/haushalt.db        docs/data/haushalt.db
-          cp data/haushaltsstellen.csv docs/data/haushaltsstellen.csv
-          cp data/meta.json          docs/data/meta.json
+      # 03_build_db.py schreibt JSON direkt nach docs/data/ – kein manuelles Kopieren nötig.
+      # haushalt.db zusätzlich bereitstellen (Backup / Offline-Nutzung).
+      - name: SQLite-DB nach docs/ kopieren
+        run: cp data/haushalt.db docs/data/haushalt.db
 
       - name: GitHub Pages deployen
         uses: peaceiris/actions-gh-pages@v4
