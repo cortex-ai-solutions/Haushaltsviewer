@@ -86,6 +86,7 @@
     <button class="tab"        data-tab="haushalt"  >💰 Haushaltsstellen</button>
     <button class="tab"        data-tab="stellen"   >👥 Planstellen</button>
     <button class="tab"        data-tab="gesamtplan">📋 Gesamtplan</button>
+    <button class="tab"        data-tab="schulden"  >📉 Schulden & Zinsen</button>
   </div>
 
   <!-- Tab: Haushaltsstellen (standardmäßig hidden – Struktur ist der erste Tab) -->
@@ -169,6 +170,13 @@
     <div id="stellen-result"></div>
   </div>
 
+  <!-- Tab: Schulden & Zinsen -->
+  <div id="tab-schulden" class="tab-panel hidden">
+    <div id="schulden-tab-content">
+      <p style="padding:1.5rem;color:var(--gray-400)">Wird geladen …</p>
+    </div>
+  </div>
+
   <!-- Tab: Haushaltsstruktur (Treemap) — Standard-Tab -->
   <div id="tab-struktur" class="tab-panel">
     <div class="chart-header" style="margin-bottom:.6rem">
@@ -202,33 +210,6 @@
     <p id="footer-stand">Stand: –</p>
   </div>
 </footer>
-
-<!-- ── Verschuldungs-Modal ────────────────────────────────────────────────────── -->
-<div id="schulden-modal" class="modal hidden">
-  <div class="modal-box modal-wide">
-    <div class="modal-header">
-      <h3>🏦 Thüringen – Schulden &amp; Zinsaufwendungen</h3>
-      <button id="schulden-close" class="btn-ghost modal-close">✕</button>
-    </div>
-
-    <!-- Kennzahlen-Leiste -->
-    <div id="schulden-kacheln" class="schulden-kacheln"></div>
-
-    <!-- Nettokreditaufnahme vs. Tilgung -->
-    <h4 class="modal-section-title">Kreditfinanzierungsplan 2026 / 2027</h4>
-    <div id="schulden-kredit-chart"></div>
-
-    <!-- Zinsaufwendungen -->
-    <h4 class="modal-section-title">Zinsaufwendungen im Haushalt</h4>
-    <div id="schulden-zinsen-table"></div>
-
-    <p class="modal-hinweis">
-      Quellen: §1 und §2 Thüringer Haushaltsgesetz 2026/2027 · Kreditfinanzierungsplan (Teil III Gesamtplan) ·
-      Gesamter Schuldenstand (Kreditmarktschulden) aus dem Thüringer Landesschuldenbericht ·
-      Zinsaufwendungen aus den Haushaltsstellen EP 17 Kapitel 1706.
-    </p>
-  </div>
-</div>
 
 <!-- ── API-Key Modal ─────────────────────────────────────────────────────────── -->
 <div id="key-modal" class="modal hidden">

@@ -477,14 +477,16 @@ async function renderStellenBarChart() {
   });
 }
 
-// ── Verschuldungs-Modal ───────────────────────────────────────────────────────
-let _schuldenRendered = false;
+// ── Schulden & Zinsen – Tab ───────────────────────────────────────────────────
+let _schuldenTabLoaded = false;
 
-async function renderVerschuldungDetails() {
-  if (_schuldenRendered) return;
-  _schuldenRendered = true;
+async function renderSchuldenTab() {
+  if (_schuldenTabLoaded) return;
+  _schuldenTabLoaded = true;
 
-  // Zinsaufwendungen aus DB laden
+  const content = el("schulden-tab-content");
+  if (!content) return;
+
   const zinsenRows = await query(`
     SELECT titel, titel_name, ansatz_2026, ansatz_2027
     FROM haus.haushaltsstellen
@@ -495,85 +497,156 @@ async function renderVerschuldungDetails() {
   const zinsen26 = zinsenRows.reduce((s, r) => s + (r.ansatz_2026 || 0), 0);
   const zinsen27 = zinsenRows.reduce((s, r) => s + (r.ansatz_2027 || 0), 0);
 
-  // ── Kennzahlen-Kacheln ────────────────────────────────────────────────────
-  document.getElementById("schulden-kacheln").innerHTML = `
-    <div class="schulden-kachel">
-      <div class="sk-label">Nettoneuverschuldung 2026</div>
-      <div class="sk-value sk-rot">${fmtEURFull(SCHULDEN_REF.netto_2026)}</div>
-      <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
-    </div>
-    <div class="schulden-kachel">
-      <div class="sk-label">Nettoneuverschuldung 2027</div>
-      <div class="sk-value sk-rot">${fmtEURFull(SCHULDEN_REF.netto_2027)}</div>
-      <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
-    </div>
-    <div class="schulden-kachel">
-      <div class="sk-label">Zinsaufwendungen 2026</div>
-      <div class="sk-value">${fmtEURFull(zinsen26)}</div>
-      <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
-    </div>
-    <div class="schulden-kachel">
-      <div class="sk-label">Zinsaufwendungen 2027</div>
-      <div class="sk-value">${fmtEURFull(zinsen27)}</div>
-      <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
-    </div>
-  `;
+  const n26 = SCHULDEN_REF.netto_2026;
+  const n27 = SCHULDEN_REF.netto_2027;
 
   // ── Kreditfinanzierungsplan-Chart ─────────────────────────────────────────
   const kreditData = [
     { label: "Brutto-Aufnahme 2026", wert: SCHULDEN_REF.brutto_aufnahme_2026, typ: "aufnahme" },
     { label: "Tilgung 2026",         wert: SCHULDEN_REF.tilgung_2026,         typ: "tilgung"  },
-    { label: "Netto 2026",           wert: SCHULDEN_REF.netto_2026,           typ: "netto"    },
+    { label: "Netto 2026",           wert: n26,                               typ: "netto"    },
     { label: "Brutto-Aufnahme 2027", wert: SCHULDEN_REF.brutto_aufnahme_2027, typ: "aufnahme" },
     { label: "Tilgung 2027",         wert: SCHULDEN_REF.tilgung_2027,         typ: "tilgung"  },
-    { label: "Netto 2027",           wert: SCHULDEN_REF.netto_2027,           typ: "netto"    },
+    { label: "Netto 2027",           wert: n27,                               typ: "netto"    },
   ];
   const maxK = Math.max(...kreditData.map(d => d.wert));
-  const kreditColors = { aufnahme: "#c62828", tilgung: "#2e7d32", netto: "#e65100" };
+  const kColors = { aufnahme: "#c62828", tilgung: "#1b5e20", netto: "#e65100" };
 
-  document.getElementById("schulden-kredit-chart").innerHTML = `
-    <div style="padding:.5rem 0">
-      ${kreditData.map(d => `
-        <div style="display:flex;align-items:center;gap:.8rem;margin:.35rem 0;">
-          <div style="width:180px;font-size:.8rem;color:var(--gray-600);text-align:right;flex-shrink:0">${d.label}</div>
-          <div style="flex:1;background:var(--gray-100);border-radius:3px;height:22px;overflow:hidden;">
-            <div style="width:${(d.wert/maxK*100).toFixed(1)}%;background:${kreditColors[d.typ]};height:100%;border-radius:3px"></div>
-          </div>
-          <div style="width:140px;font-size:.8rem;font-variant-numeric:tabular-nums;color:var(--gray-800);text-align:right">${fmtEURFull(d.wert)}</div>
-        </div>`).join("")}
-      <p style="font-size:.72rem;color:var(--gray-400);margin-top:.5rem">
-        Quelle: §2 ThürHhG + Teil III Gesamtplan (Kreditfinanzierungsplan) · Beträge gerundet
-      </p>
-    </div>
-  `;
+  const kreditChart = kreditData.map(d => `
+    <div style="display:flex;align-items:center;gap:.8rem;margin:.35rem 0;">
+      <div style="width:180px;font-size:.8rem;color:var(--gray-600);text-align:right;flex-shrink:0">${d.label}</div>
+      <div style="flex:1;background:var(--gray-100);border-radius:3px;height:22px;overflow:hidden;">
+        <div style="width:${(d.wert/maxK*100).toFixed(1)}%;background:${kColors[d.typ]};height:100%;border-radius:3px"></div>
+      </div>
+      <div style="width:150px;font-size:.8rem;font-variant-numeric:tabular-nums;color:var(--gray-800);text-align:right">${fmtEURFull(d.wert)}</div>
+    </div>`).join("");
+
+  // ── Zinskosten-Sensitivitätsanalyse ──────────────────────────────────────
+  // Kumuliert n Jahre: n26*r*Jahre + n27*r*(Jahre-1)  [n27 wirkt ein Jahr kürzer]
+  const raten = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+  const zinsTbody = raten.map(r => {
+    const rate   = r / 100;
+    const k26    = n26 * rate;
+    const k27    = n27 * rate;
+    const dauer  = (n26 + n27) * rate;
+    const kum10  = n26 * rate * 10 + n27 * rate * 9;
+    const kum20  = n26 * rate * 20 + n27 * rate * 19;
+    const highlight = r === 3.0 ? "style=\"background:#fff8e1;font-weight:600\"" : "";
+    return `<tr ${highlight}>
+      <td style="padding:.4rem .7rem">${r.toFixed(1).replace(".", ",")} %</td>
+      <td class="num" style="padding:.4rem .7rem">${fmtEUR(k26, 0)}</td>
+      <td class="num" style="padding:.4rem .7rem">${fmtEUR(k27, 0)}</td>
+      <td class="num" style="padding:.4rem .7rem;font-weight:600">${fmtEUR(dauer, 0)}</td>
+      <td class="num" style="padding:.4rem .7rem">${fmtEUR(kum10, 1)}</td>
+      <td class="num" style="padding:.4rem .7rem">${fmtEUR(kum20, 1)}</td>
+    </tr>`;
+  }).join("");
 
   // ── Zinsen-Tabelle ────────────────────────────────────────────────────────
-  if (zinsenRows.length) {
-    const tbody = zinsenRows.map(r => `
-      <tr>
-        <td>${r.titel}</td>
-        <td>${r.titel_name}</td>
-        <td class="num">${fmtEURFull(r.ansatz_2026)}</td>
-        <td class="num">${fmtEURFull(r.ansatz_2027)}</td>
-      </tr>`).join("");
+  const zinsTitel = zinsenRows.map(r => `
+    <tr>
+      <td style="padding:.35rem .6rem">${r.titel}</td>
+      <td style="padding:.35rem .6rem">${r.titel_name}</td>
+      <td class="num" style="padding:.35rem .6rem">${fmtEURFull(r.ansatz_2026)}</td>
+      <td class="num" style="padding:.35rem .6rem">${fmtEURFull(r.ansatz_2027)}</td>
+    </tr>`).join("");
 
-    document.getElementById("schulden-zinsen-table").innerHTML = `
-      <table style="width:100%;font-size:.83rem">
-        <thead><tr>
-          <th style="text-align:left;padding:.4rem .6rem;background:var(--gray-100)">Titel</th>
-          <th style="text-align:left;padding:.4rem .6rem;background:var(--gray-100)">Bezeichnung</th>
-          <th style="text-align:right;padding:.4rem .6rem;background:var(--gray-100)">Ansatz 2026</th>
-          <th style="text-align:right;padding:.4rem .6rem;background:var(--gray-100)">Ansatz 2027</th>
+  content.innerHTML = `
+    <!-- Kennzahlen -->
+    <div class="schulden-kacheln">
+      <div class="schulden-kachel">
+        <div class="sk-label">Nettoneuverschuldung 2026</div>
+        <div class="sk-value sk-rot">${fmtEURFull(n26)}</div>
+        <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
+      </div>
+      <div class="schulden-kachel">
+        <div class="sk-label">Nettoneuverschuldung 2027</div>
+        <div class="sk-value sk-rot">${fmtEURFull(n27)}</div>
+        <div class="sk-sub">§2(1) ThürHhG 2026/2027</div>
+      </div>
+      <div class="schulden-kachel">
+        <div class="sk-label">Gesamtneuverschuldung 2026+2027</div>
+        <div class="sk-value sk-rot">${fmtEUR(n26 + n27, 2)}</div>
+        <div class="sk-sub">Doppelhaushalt gesamt</div>
+      </div>
+      <div class="schulden-kachel">
+        <div class="sk-label">Zinsaufwendungen 2026</div>
+        <div class="sk-value">${fmtEURFull(zinsen26)}</div>
+        <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
+      </div>
+      <div class="schulden-kachel">
+        <div class="sk-label">Zinsaufwendungen 2027</div>
+        <div class="sk-value">${fmtEURFull(zinsen27)}</div>
+        <div class="sk-sub">EP 17 Kap. 1706 · Titel 575xx</div>
+      </div>
+    </div>
+
+    <!-- Kreditfinanzierungsplan -->
+    <h4 class="modal-section-title" style="margin-top:1.5rem">Kreditfinanzierungsplan 2026 / 2027</h4>
+    <div style="padding:.4rem 0 1rem">
+      ${kreditChart}
+      <p style="font-size:.72rem;color:var(--gray-400);margin-top:.5rem">
+        <span style="color:${kColors.aufnahme}">■</span> Brutto-Aufnahme &nbsp;
+        <span style="color:${kColors.tilgung}">■</span> Tilgung &nbsp;
+        <span style="color:${kColors.netto}">■</span> Netto &nbsp;·&nbsp;
+        Quelle: §2 ThürHhG + Teil III Gesamtplan
+      </p>
+    </div>
+
+    <!-- Zinskosten-Sensitivitätsanalyse -->
+    <h4 class="modal-section-title">Zinskosten der Neuverschuldung – Sensitivitätsanalyse</h4>
+    <p style="font-size:.84rem;color:var(--gray-600);margin:.4rem 0 .8rem;line-height:1.5">
+      Thüringen nimmt im Doppelhaushalt netto <strong>${fmtEURFull(n26 + n27)}</strong> neu auf.
+      Die Tabelle zeigt die dauerhaften Folgekosten bei verschiedenen Zinssätzen –
+      gleichzeitig entspricht dies der <strong>jährlichen Zinsersparnis bei Nullverschuldung</strong>.
+      Hervorgehoben (3,0 %) entspricht etwa dem aktuellen Niveau für Bundesländer-Anleihen.
+    </p>
+    <div style="overflow-x:auto;margin-bottom:1.5rem">
+      <table style="width:100%;font-size:.83rem;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--gray-100)">
+            <th style="padding:.4rem .7rem;text-align:left">Zinssatz</th>
+            <th style="padding:.4rem .7rem;text-align:right">Jährl. Kosten<br>2026-Kredit</th>
+            <th style="padding:.4rem .7rem;text-align:right">Jährl. Kosten<br>2027-Kredit</th>
+            <th style="padding:.4rem .7rem;text-align:right;background:#fff3e0">Dauerlast<br>ab 2028 / Jahr</th>
+            <th style="padding:.4rem .7rem;text-align:right">Kumuliert<br>10 Jahre</th>
+            <th style="padding:.4rem .7rem;text-align:right">Kumuliert<br>20 Jahre</th>
+          </tr>
+        </thead>
+        <tbody>${zinsTbody}</tbody>
+      </table>
+      <p style="font-size:.71rem;color:var(--gray-400);margin-top:.4rem">
+        Lineare Berechnung ohne Zinseszins · Annahme: konstante Zinsbindung ·
+        Kumuliert = (2026-Kredit × Rate × n) + (2027-Kredit × Rate × n−1)
+      </p>
+    </div>
+
+    <!-- Zinsaufwendungen-Tabelle -->
+    <h4 class="modal-section-title">Zinsaufwendungen im Haushalt (EP 17 · Kap. 1706)</h4>
+    ${zinsenRows.length ? `
+      <table style="width:100%;font-size:.83rem;border-collapse:collapse">
+        <thead><tr style="background:var(--gray-100)">
+          <th style="text-align:left;padding:.4rem .6rem">Titel</th>
+          <th style="text-align:left;padding:.4rem .6rem">Bezeichnung</th>
+          <th style="text-align:right;padding:.4rem .6rem">Ansatz 2026</th>
+          <th style="text-align:right;padding:.4rem .6rem">Ansatz 2027</th>
         </tr></thead>
-        <tbody>${tbody}</tbody>
+        <tbody>${zinsTitel}</tbody>
         <tfoot><tr style="font-weight:700;background:var(--gray-100)">
           <td colspan="2" style="padding:.4rem .6rem">Gesamt Zinsaufwendungen</td>
           <td class="num" style="padding:.4rem .6rem">${fmtEURFull(zinsen26)}</td>
           <td class="num" style="padding:.4rem .6rem">${fmtEURFull(zinsen27)}</td>
         </tr></tfoot>
       </table>
-    `;
-  }
+    ` : `<p style="color:var(--gray-400)">Keine Zinsdaten verfügbar.</p>`}
+
+    <p class="gp-hinweis" style="margin-top:1.2rem">
+      Quellen: §1 und §2 Thüringer Haushaltsgesetz 2026/2027 · Kreditfinanzierungsplan (Teil III Gesamtplan) ·
+      Zinsaufwendungen: Haushaltsstellen EP 17 Kapitel 1706 (Titel 575xx) ·
+      Historischer Schuldenstand: <a href="https://finanzen.thueringen.de" target="_blank">Thüringer Landesschuldenbericht</a>
+      (nicht im Datensatz enthalten)
+    </p>
+  `;
 }
 
 // ── Tab-Switching ─────────────────────────────────────────────────────────────
@@ -584,11 +657,12 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t =>
     t.classList.toggle("active", t.dataset.tab === name)
   );
-  ["haushalt", "stellen", "struktur", "gesamtplan"].forEach(t => {
+  ["haushalt", "stellen", "struktur", "gesamtplan", "schulden"].forEach(t => {
     el(`tab-${t}`)?.classList.toggle("hidden", name !== t);
   });
 
   if (name === "gesamtplan") renderGesamtplanTab();
+  if (name === "schulden")   renderSchuldenTab();
 
   // Stellen: Balkendiagramm zuerst, dann Explorer (sequentiell – kein paralleler DuckDB-Konflikt)
   if (name === "stellen" && !_stellenTabLoaded) {
@@ -739,9 +813,9 @@ async function renderGesamtplanTab() {
   container.innerHTML = html;
 }
 
-async function openSchuldenModal() {
-  document.getElementById("schulden-modal").classList.remove("hidden");
-  await renderVerschuldungDetails();
+function openSchuldenModal() {
+  switchTab("schulden");
+  el("tab-schulden")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function fmtAbw(ist, soll) {
@@ -1111,13 +1185,7 @@ function initUI() {
     el("treemap-ep-detail")?.classList.add("hidden")
   );
 
-  // Schulden-Modal schließen (× und Backdrop)
-  el("schulden-close")?.addEventListener("click", () =>
-    el("schulden-modal")?.classList.add("hidden")
-  );
-  el("schulden-modal")?.addEventListener("click", function(e) {
-    if (e.target === this) this.classList.add("hidden");
-  });
+  // Schulden-Tab: Kachel-Klick → Tab öffnen (Modal wurde durch Tab ersetzt)
 
   // Haushalt-Explorer Filter
   el("filter-btn")?.addEventListener("click", () => runHaushaltExplorer());
