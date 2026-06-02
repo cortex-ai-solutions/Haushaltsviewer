@@ -798,6 +798,8 @@ async function runStellenExplorer() {
 
   const container = document.getElementById("stellen-result");
   container.innerHTML = `<p style="padding:1.2rem;color:var(--gray-400)">Lade …</p>`;
+  const chartContainer = el("stellen-bg-chart");
+  if (chartContainer) chartContainer.innerHTML = "";
 
   const cond = [];
   if (ep)        cond.push(`s.einzelplan = '${esc(ep)}'`);
@@ -874,6 +876,65 @@ async function runStellenExplorer() {
       </tr></tfoot>
     </table>
   `;
+
+  renderBesoldungChart(rows);
+}
+
+// ── Besoldungsgruppen-Balkendiagramm ──────────────────────────────────────────
+function renderBesoldungChart(rows) {
+  const container = el("stellen-bg-chart");
+  if (!container) return;
+
+  if (!rows.length) { container.innerHTML = ""; return; }
+
+  // Aggregiere stellen_2026 je Besoldungsgruppe + merke Typ (Beamter/Tarif)
+  const agg = {};
+  rows.forEach(r => {
+    const bg = r.besoldung || "–";
+    if (!agg[bg]) agg[bg] = { stellen: 0, typ: r.typ };
+    agg[bg].stellen += Number(r.stellen_2026) || 0;
+  });
+
+  // Sortierung: Buchstabe alphabetisch, dann Zahl aufsteigend, Suffix (a/b) alphabetisch
+  const sortBG = (a, b) => {
+    const p = s => { const m = s.match(/^([A-Za-z]+)(\d+)([a-z]*)$/); return m ? [m[1], +m[2], m[3]] : [s, 0, ""]; };
+    const [la, na, sa] = p(a); const [lb, nb, sb] = p(b);
+    return la !== lb ? la.localeCompare(lb) : na !== nb ? na - nb : sa.localeCompare(sb);
+  };
+
+  const sorted = Object.entries(agg).sort(([a], [b]) => sortBG(a, b));
+  const maxVal = Math.max(...sorted.map(([, v]) => v.stellen), 1);
+  const barH   = 140; // px Balkenhöhe
+
+  const bars = sorted.map(([bg, { stellen, typ }]) => {
+    const hPct  = Math.max((stellen / maxVal) * barH, 2).toFixed(0);
+    const color = typ === "Beamter" ? "#2e7d32" : "#4caf50";
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:26px;max-width:52px">
+        <div style="font-size:.62rem;color:var(--gray-600);margin-bottom:2px;line-height:1">${stellen}</div>
+        <div style="width:100%;height:${barH}px;display:flex;align-items:flex-end">
+          <div style="width:100%;height:${hPct}px;background:${color};border-radius:2px 2px 0 0"
+               title="${bg}: ${fmtN(stellen)} Stellen 2026"></div>
+        </div>
+        <div style="font-size:.62rem;color:var(--gray-700);margin-top:3px;writing-mode:vertical-rl;
+                    transform:rotate(180deg);white-space:nowrap;max-height:48px;overflow:hidden">${bg}</div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div style="margin:.8rem 0 .4rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+        <span style="font-size:.78rem;font-weight:600;color:var(--gray-700)">Stellen 2026 je Besoldungs-/Entgeltgruppe</span>
+        <span style="font-size:.72rem;color:var(--gray-500)">
+          <span style="display:inline-block;width:9px;height:9px;background:#2e7d32;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Beamte
+          <span style="display:inline-block;width:9px;height:9px;background:#4caf50;border-radius:2px;margin:0 3px 0 8px;vertical-align:middle"></span>Tarif
+        </span>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:4px;overflow-x:auto;
+                  padding-bottom:2px;border-bottom:2px solid var(--gray-200)">
+        ${bars}
+      </div>
+    </div>`;
 }
 
 // ── Tabelle rendern (generisch) ───────────────────────────────────────────────
