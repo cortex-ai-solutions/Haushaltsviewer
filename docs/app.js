@@ -323,31 +323,65 @@ async function renderTreemap(jahr = _treemapJahr) {
   const cells = squarify(items, { x: 0, y: 0, w: W, h: H });
 
   container.innerHTML = "";
+  const legendItems = [];   // EPs die zu klein für lesbare Beschriftung sind
+
   cells.forEach(c => {
-    // Mindestgröße für Darstellung: 8×8 px
-    if (c.w < 8 || c.h < 8) return;
+    // Zellen unter 3 px komplett überspringen (echte Pixel-Artefakte)
+    if (c.w < 3 || c.h < 3) { legendItems.push(c); return; }
 
     const div = document.createElement("div");
     div.className = "treemap-cell";
-    // Math.round verhindert Sub-Pixel-Risse zwischen Zellen
     div.style.cssText =
       `left:${Math.round(c.x)}px;top:${Math.round(c.y)}px;` +
       `width:${Math.round(c.w)}px;height:${Math.round(c.h)}px;` +
       `background:${c.color}`;
 
-    // Kurzname aus EP_KURZ-Tabelle, Fallback auf letztes Wort des vollen Namens
     const label = EP_KURZ[c.ep] || c.name.split(" ").pop();
 
-    // Text nur anzeigen wenn Zelle groß genug
-    const showText = c.w > 60 && c.h > 32;
-    div.innerHTML = showText
-      ? `<div class="cell-name">${label}</div><div class="cell-value">${fmtEUR(c.val)}</div>`
-      : "";
+    // 4 Label-Stufen je nach Zellgröße
+    let inner = "";
+    if (c.w > 68 && c.h > 34) {
+      // Stufe 1: voller Name + Wert
+      inner = `<div class="cell-name">${label}</div><div class="cell-value">${fmtEUR(c.val)}</div>`;
+    } else if (c.w > 40 && c.h > 20) {
+      // Stufe 2: Name + kompakter Wert
+      inner = `<div class="cell-name" style="font-size:.72rem;line-height:1.15">${label}</div>
+               <div class="cell-value" style="font-size:.64rem">${fmtEUR(c.val, 0)}</div>`;
+    } else if (c.w > 22 && c.h > 13) {
+      // Stufe 3: nur Name, kleine Schrift
+      inner = `<div class="cell-name" style="font-size:.62rem;line-height:1;white-space:nowrap;
+                    overflow:hidden;padding:2px 3px">${label}</div>`;
+    } else {
+      // Stufe 4: kein Text → Legende
+      legendItems.push(c);
+    }
+    div.innerHTML = inner;
     div.title = `${c.name}: ${fmtEURFull(c.val)}`;
 
     div.addEventListener("click", () => renderEpDetail(c.ep, c.name, jahr));
     container.appendChild(div);
   });
+
+  // Kompakte Legende für EPs die zu klein zum Beschriften sind
+  const legendEl = el("treemap-legend");
+  if (legendEl) {
+    legendEl.innerHTML = "";
+    if (legendItems.length) {
+      legendEl.style.cssText =
+        "display:flex;flex-wrap:wrap;gap:5px 14px;margin-top:5px;padding:3px 0;font-size:.72rem;color:var(--gray-600)";
+      legendItems.forEach(c => {
+        const span = document.createElement("span");
+        span.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer";
+        span.innerHTML =
+          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c.color};flex-shrink:0"></span>` +
+          `${EP_KURZ[c.ep] || c.name.split(" ").pop()}` +
+          `<span style="color:var(--gray-400)">${fmtEUR(c.val, 0)}</span>`;
+        span.title = `${c.name}: ${fmtEURFull(c.val)}`;
+        span.addEventListener("click", () => renderEpDetail(c.ep, c.name, jahr));
+        legendEl.appendChild(span);
+      });
+    }
+  }
 }
 
 // ── Sankey: Mittelherkunft → Mittelverwendung ─────────────────────────────────
